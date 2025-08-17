@@ -1,7 +1,7 @@
 #![no_std]
 
 pub mod config;
-mod register;
+pub mod register;
 pub mod bus;
 mod calibration;
 
@@ -11,7 +11,7 @@ use embedded_hal_async::i2c::SevenBitAddress;
 use crate::bus::{Bus, I2c, Spi};
 use crate::calibration::CalibrationData;
 use crate::config::Configuration;
-use crate::register::Register;
+use crate::register::{PowerMode, Register};
 
 const BMP390_CHIP_ID:u8 = 0x60;
 
@@ -112,6 +112,30 @@ where
             .map_err(Bmp390Error::Bus)?;
 
         Ok(buf[0] == BMP390_CHIP_ID)
+    }
+
+    pub async fn set_mode(&mut self, mode: PowerMode) -> Bmp390Result<(), B::Error> {
+        let mut buf = [0u8; 1];
+        self.bus.read_register(Register::PwrCtrl, &mut buf)
+            .await
+            .map_err(Bmp390Error::Bus)?;
+
+        let value = (buf[0] & 0b11) | (mode.register_value() << 4);
+        self.bus.write_register(Register::PwrCtrl, value)
+            .await
+            .map_err(Bmp390Error::Bus)?;
+
+        Ok(())
+    }
+
+    pub async fn mode(&mut self) -> Bmp390Result<PowerMode, B::Error> {
+        let mut buf = [0u8; 1];
+        self.bus.read_register(Register::PwrCtrl, &mut buf)
+            .await
+            .map_err(Bmp390Error::Bus)?;
+
+        // OK to use .unwrap() here as PowerMode::try_from's error type is Infallible
+        Ok(PowerMode::try_from(buf[0]).unwrap())
     }
 
     pub async fn read_sensor_data(&mut self) -> Bmp390Result<Measurement, B::Error> {

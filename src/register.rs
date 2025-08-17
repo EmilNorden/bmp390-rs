@@ -1,3 +1,5 @@
+use core::convert::Infallible;
+use crate::Bmp390Error;
 
 #[derive(Copy, Clone)]
 pub enum OutputDataRate {
@@ -67,17 +69,31 @@ impl Oversampling {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PowerMode {
     Sleep,
     Forced,
     Normal,
 }
 
+impl TryFrom<u8> for PowerMode {
+    type Error = Infallible;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        let bits = (value >> 4) & 0b11;
+        match bits {
+            0b00 => Ok(PowerMode::Sleep),
+            0b01 | 0b10 => Ok(PowerMode::Forced),
+            _ => Ok(PowerMode::Normal),
+        }
+    }
+}
+
 impl PowerMode {
     pub(crate) fn register_value(&self) -> u8 {
         match self {
             PowerMode::Sleep => 0b00,
-            PowerMode::Forced => 0b10,
+            PowerMode::Forced => 0b01,
             PowerMode::Normal => 0b11,
         }
     }
