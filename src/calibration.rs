@@ -109,7 +109,7 @@ const fn pow2f(e: i32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use alloc::vec::Vec;
+    use smallvec::SmallVec;
     use crate::bus::Bus;
     use crate::register::Register;
     use super::*;
@@ -117,7 +117,7 @@ mod tests {
     struct FakeBus<'a> {
         pub data: &'a [u8],
         pub read_bytes: usize,
-        pub read_registers: Vec<Register>,
+        pub read_registers: SmallVec<[Register; 10]>,
     }
 
     impl<'a> FakeBus<'a> {
@@ -125,7 +125,7 @@ mod tests {
             FakeBus {
                 data,
                 read_bytes: 0,
-                read_registers: Vec::new(),
+                read_registers: SmallVec::new(),
             }
         }
     }
