@@ -69,10 +69,16 @@ impl Oversampling {
     }
 }
 
+/// Describes the different power modes that can be set in the PwrCtrl register.
+///
+/// For more information, see section 3.3 in the datasheet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PowerMode {
+    /// Sleep mode. This is the default mode after power on reset.
     Sleep,
+    /// Forced mode. In this mode, a single measurement is performed after which the device returns to Sleep mode.
     Forced,
+    // Normal mode. In this mode, measurements are constantly performed at the rate set in the odr_sel register
     Normal,
 }
 
@@ -137,5 +143,28 @@ pub enum Register {
 impl Register {
     pub(crate) fn addr(&self) -> u8 {
         *self as u8
+    }
+}
+
+pub struct ErrorRegister(u8);
+
+impl ErrorRegister {
+    /// Fatal error
+    pub fn fatal_error(&self) -> bool {
+        self.0 & 0b1 != 0
+    }
+
+    /// Command execution failed.
+    ///
+    /// Cleared on read.
+    pub fn cmd_err(&self) -> bool {
+        self.0 & 0b10 != 0
+    }
+
+    /// Sensor configuration error detected.
+    ///
+    /// This is only detected in `Normal` mode. Cleared on read.
+    pub fn conf_err(&self) -> bool {
+        self.0 & 0b100 != 0
     }
 }

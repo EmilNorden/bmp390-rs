@@ -117,17 +117,22 @@ where
         Ok(buf[0] == BMP390_CHIP_ID)
     }
 
-    /// Sets the power mode of the device. 
-    /// 
+    /// Sets the power mode of the device by writing to the PwrCtrl register
+    ///
     /// As described in section 3.3.4 of the datasheet, these are the valid state transitions:
-    /// 
+    ///
     /// Sleep => Normal
-    /// 
+    ///
     /// Normal => Sleep
-    /// 
+    ///
     /// Sleep => Forced => Sleep (Forced is a transient state and the device will return to Sleep when the measurement is finished)
-    /// 
+    ///
     /// The device ignores any attempt to perform an invalid state transition.
+    ///
+    /// # Examples
+    ///
+    /// ```rust, no_run
+    /// device.set_mode(PowerMode::Normal).await?
     pub async fn set_mode(&mut self, mode: PowerMode) -> Bmp390Result<(), B::Error> {
         let mut buf = [0u8; 1];
         self.bus.read_register(Register::PwrCtrl, &mut buf)
@@ -141,9 +146,12 @@ where
 
         Ok(())
     }
-
-    /// Returns the current power mode.
-    /// 
+    /// Reads the current power mode from the PwrCtrl register
+    ///
+    /// # Examples
+    ///
+    /// ```rust, no_run
+    /// device.mode()?
     pub async fn mode(&mut self) -> Bmp390Result<PowerMode, B::Error> {
         let mut buf = [0u8; 1];
         self.bus.read_register(Register::PwrCtrl, &mut buf)
@@ -173,6 +181,8 @@ where
             temperature: compensated_temperature,
         })
     }
+    
+    
 }
 
 pub struct Measurement {
