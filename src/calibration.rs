@@ -1,6 +1,5 @@
-use crate::{Bmp390Error, Bmp390Result};
+use crate::{register, Bmp390Error, Bmp390Result};
 use crate::bus::Bus;
-use crate::register::Register;
 
 pub struct CalibrationData {
     par_t1: f32,
@@ -23,40 +22,24 @@ pub struct CalibrationData {
 impl CalibrationData {
     pub async fn new<B: Bus>(bus: &mut B) -> Bmp390Result<Self, B::Error> {
         let mut buf = [0u8; 21];
-        bus.read_register(Register::CalibrationDataStart, &mut buf)
-            .await
-            .map_err(Bmp390Error::Bus)?;
+        let calib_coeffs = bus.read::<register::Calibration>().await?;
 
-        let t1 = u16::from_le_bytes([buf[0], buf[1]]);
-        let t2 = u16::from_le_bytes([buf[2], buf[3]]);
-        let t3 = i8::from_le_bytes([buf[4]]);
-        let p1 = i16::from_le_bytes([buf[5], buf[6]]);
-        let p2 = i16::from_le_bytes([buf[7], buf[8]]);
-        let p3 = i8::from_le_bytes([buf[9]]);
-        let p4 = i8::from_le_bytes([buf[10]]);
-        let p5 = u16::from_le_bytes([buf[11], buf[12]]);
-        let p6 = u16::from_le_bytes([buf[13], buf[14]]);
-        let p7 = i8::from_le_bytes([buf[15]]);
-        let p8 = i8::from_le_bytes([buf[16]]);
-        let p9 = i16::from_le_bytes([buf[17], buf[18]]);
-        let p10 = i8::from_le_bytes([buf[19]]);
-        let p11 = i8::from_le_bytes([buf[20]]);
 
         Ok(Self {
-            par_t1: (t1 as f32) / 0.00390625,
-            par_t2: (t2 as f32) / 1073741824.0,
-            par_t3: (t3 as f32) / 281474976710656.0,
-            par_p1: (p1 as f32 - 16384.0) / 1048576.0,
-            par_p2: (p2 as f32 - 16384.0) / 536870912.0,
-            par_p3: (p3 as f32) / 4294967296.0,
-            par_p4: (p4 as f32) / 137438953472.0,
-            par_p5: (p5 as f32) / 0.125,
-            par_p6: (p6 as f32) / 64.0,
-            par_p7: (p7 as f32) / 256.0,
-            par_p8: (p8 as f32) / 32768.0,
-            par_p9: (p9 as f32) / 281474976710656.0,
-            par_p10: (p10 as f32) / 281474976710656.0,
-            par_p11: (p11 as f32) / 36893488147419103232.0,
+            par_t1: (calib_coeffs.nvm_par_t1 as f32) / 0.00390625,
+            par_t2: (calib_coeffs.nvm_par_t2 as f32) / 1073741824.0,
+            par_t3: (calib_coeffs.nvm_par_t3 as f32) / 281474976710656.0,
+            par_p1: (calib_coeffs.nvm_par_p1 as f32 - 16384.0) / 1048576.0,
+            par_p2: (calib_coeffs.nvm_par_p2 as f32 - 16384.0) / 536870912.0,
+            par_p3: (calib_coeffs.nvm_par_p3 as f32) / 4294967296.0,
+            par_p4: (calib_coeffs.nvm_par_p4 as f32) / 137438953472.0,
+            par_p5: (calib_coeffs.nvm_par_p5 as f32) / 0.125,
+            par_p6: (calib_coeffs.nvm_par_p6 as f32) / 64.0,
+            par_p7: (calib_coeffs.nvm_par_p7 as f32) / 256.0,
+            par_p8: (calib_coeffs.nvm_par_p8 as f32) / 32768.0,
+            par_p9: (calib_coeffs.nvm_par_p9 as f32) / 281474976710656.0,
+            par_p10: (calib_coeffs.nvm_par_p10 as f32) / 281474976710656.0,
+            par_p11: (calib_coeffs.nvm_par_p11 as f32) / 36893488147419103232.0,
             t_lin: 0.0,
         })
     }
@@ -111,13 +94,14 @@ const fn pow2f(e: i32) -> f32 {
 mod tests {
     use smallvec::SmallVec;
     use crate::bus::Bus;
-    use crate::register::Register;
+    use crate::register::{Readable, Writable};
     use super::*;
 
     struct FakeBus<'a> {
         pub data: &'a [u8],
         pub read_bytes: usize,
-        pub read_registers: SmallVec<[Register; 10]>,
+        // TODO Replace this field
+        // pub read_registers: SmallVec<[Register; 10]>,
     }
 
     impl<'a> FakeBus<'a> {
@@ -125,24 +109,32 @@ mod tests {
             FakeBus {
                 data,
                 read_bytes: 0,
-                read_registers: SmallVec::new(),
+                //read_registers: SmallVec::new(),
             }
         }
     }
 
     impl Bus for FakeBus<'_> {
         type Error = ();
-
-        async fn write_register(&mut self, reg: Register, data: u8) -> Result<(), Self::Error> {
+/*
+        async fn write_register(&mut self, reg: Register, data: u8) -> Result<(), Bmp390Error<Self::Error>> {
             todo!()
         }
 
-        async fn read_register(&mut self, reg: Register, data: &mut [u8]) -> Result<(), Self::Error> {
+        async fn read_register(&mut self, reg: Register, data: &mut [u8]) -> Result<(), Bmp390Error<Self::Error>> {
             self.read_registers.push(reg);
             data.copy_from_slice(&self.data[self.read_bytes..self.read_bytes + data.len()]);
             self.read_bytes += data.len();
 
             Ok(())
+        }
+*/
+        async fn read<R: Readable>(&mut self) -> Result<R::Out, Bmp390Error<Self::Error>> {
+            todo!()
+        }
+
+        async fn write<W: Writable>(&mut self, v: &W::In) -> Result<(), Bmp390Error<Self::Error>> {
+            todo!()
         }
     }
     
@@ -154,8 +146,8 @@ mod tests {
 
         let cb = CalibrationData::new(&mut bus).await.unwrap();
 
-        assert_eq!(bus.read_registers.len(), 1);
-        assert_eq!(bus.read_registers[0], Register::CalibrationDataStart);
+        //assert_eq!(bus.read_registers.len(), 1);
+        //assert_eq!(bus.read_registers[0], Register::CalibrationDataStart);
 
         assert_eq!(cb.par_t1, 3412480.0);
         assert_eq!(cb.par_t2, 2.8690323e-5);
