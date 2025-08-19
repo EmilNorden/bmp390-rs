@@ -11,7 +11,7 @@ use embedded_hal_async::i2c::SevenBitAddress;
 use crate::bus::{Bus, I2c, Spi};
 use crate::calibration::CalibrationData;
 use crate::config::Configuration;
-use crate::register::{InvalidRegisterField};
+use crate::register::{InvalidRegisterField, Readable, Writable};
 
 const BMP390_CHIP_ID:u8 = 0x60;
 
@@ -102,6 +102,14 @@ where
         }).await?;
 
         Ok(Bmp390 { bus, calibration_data })
+    }
+
+    pub async fn read<R: Readable>(&mut self) -> Result<R::Out, Bmp390Error<B::Error>> {
+        Ok(self.bus.read::<R>().await?)
+    }
+    
+    pub async fn write<W: Writable>(&mut self, v: &W::In) ->  Result<(), Bmp390Error<B::Error>> {
+        Ok(self.bus.write::<W>(v).await?)
     }
 
     pub async fn is_connected(&mut self) -> Bmp390Result<bool, B::Error> {

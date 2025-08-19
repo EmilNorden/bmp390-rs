@@ -5,10 +5,7 @@ const MAX_REG_BYTES:usize = 22;
 
 pub trait Bus {
     type Error;
-    /*fn write_register(&mut self, reg: Register, data: u8) ->  impl Future<Output = Result<(), Bmp390Error<Self::Error>>>;
-
-    fn read_register(&mut self, reg: Register, data: &mut [u8]) -> impl Future<Output = Result<(), Bmp390Error<Self::Error>>>;
-*/
+    
     fn read<R: Readable>(&mut self) -> impl Future<Output = Result<R::Out, Bmp390Error<Self::Error>>>;
 
     fn write<W: Writable>(&mut self, v: &W::In) -> impl Future<Output = Result<(), Bmp390Error<Self::Error>>>;
@@ -35,19 +32,7 @@ where
     I2cType: embedded_hal_async::i2c::I2c,
 {
     type Error = <I2cType as embedded_hal_async::i2c::ErrorType>::Error;
-/*
-    async fn write_register(&mut self, reg: Register, value: u8) -> Result<(), Bmp390Error<Self::Error>> {
-        self.i2c.write(self.address,&[reg.addr(), value]).await.map_err(Bmp390Error::Bus)?;
 
-        Ok(())
-    }
-
-    async fn read_register(&mut self, reg: Register, data: &mut [u8]) -> Result<(), Bmp390Error<Self::Error>> {
-        self.i2c.write_read(self.address,&[reg.addr()], data).await.map_err(Bmp390Error::Bus)?;
-
-        Ok(())
-    }
-*/
     async fn read<R: Readable>(&mut self) -> Result<R::Out, Bmp390Error<Self::Error>> {
         let buf = &mut self.scratch[..R::N];
         self.i2c.write_read(self.address, &[R::ADDR], buf).await.map_err(Bmp390Error::Bus)?;
