@@ -1,4 +1,5 @@
 use core::fmt::Write;
+use crate::Bmp390;
 
 #[derive(Debug)]
 pub struct InvalidRegisterField{
@@ -33,6 +34,8 @@ pub trait Writable: Reg {
 ///
 /// - **Length:** 1 byte
 /// - **Access:** Read-only
+///
+/// Used with [`Bmp390::read::<ChipId>()`]
 pub struct ChipId;
 impl Reg for ChipId { const ADDR:u8 = 0x00; }
 
@@ -43,10 +46,12 @@ impl Readable for ChipId {
     }
 }
 
-/// Marker struct for the REV_ID (0x00) register
+/// Marker struct for the REV_ID (0x01) register
 ///
 /// - **Length:** 1 byte
 /// - **Access:** Read-only
+///
+/// Used with [`Bmp390::read::<RevId>()`]
 pub struct RevId;
 impl Reg for RevId { const ADDR:u8 = 0x01; }
 
@@ -57,6 +62,13 @@ impl Readable for RevId {
     }
 }
 
+/// Marker struct for the ERR_REG (0x02) register
+///
+/// - **Length:** 1 byte
+/// - **Access:** Read-only
+///
+/// Used with [`Bmp390::read::<ErrReg>()`] or the convenience method
+/// [`Bmp390::error_flags`].
 pub struct ErrReg;
 impl Reg for ErrReg {  const ADDR:u8 = 0x02; }
 
@@ -77,6 +89,13 @@ impl Readable for ErrReg {
     }
 }
 
+/// Marker struct for the STATUS (0x03) register
+///
+/// - **Length:** 1 byte
+/// - **Access:** Read-only
+///
+/// Used with [`Bmp390::read::<Status>()`] or the convenience method
+/// [`Bmp390::status`].
 pub struct Status;
 impl Reg for Status { const ADDR: u8 = 0x03; }
 
@@ -97,8 +116,17 @@ impl Readable for Status {
     }
 }
 
-/// Register 0x04-0x09. This is technically not "one" register, but 6 separate registers containing data for both
-/// pressure and temperature. It is not recommended to read these registers one by one. See datasheet section 3.10
+/// Marker struct for the DATA_0 - DATA_5 (0x04 - 0x09) registers.
+/// The BMP390 will auto-increment on multiple reads, so reading 6 bytes from 0x04 will read
+/// pressure and temperature in one burst read as recommended by the datasheet, section 3.10.
+/// Note that this will return the raw uncalibrated measurement data. So for most use cases
+/// calling [`Bmp390::read_sensor_data()`] is recommended as it will calibrate the data for you.
+///
+/// - **Length:** 6 bytes
+/// - **Access:** Read-only
+///
+/// Used with [`Bmp390::read::<Measurement>()`] or the method
+/// [`Bmp390::read_sensor_data()`].
 pub struct Measurement;
 impl Reg for Measurement { const ADDR: u8 = 0x04;}
 

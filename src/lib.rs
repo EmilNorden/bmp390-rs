@@ -11,7 +11,7 @@ use embedded_hal_async::i2c::SevenBitAddress;
 use crate::bus::{Bus, I2c, Spi};
 use crate::calibration::CalibrationData;
 use crate::config::Configuration;
-use crate::register::{InvalidRegisterField, Readable, Writable};
+use crate::register::{ErrReg, ErrorFlags, InvalidRegisterField, Readable, Status, StatusFlags, Writable};
 
 const BMP390_CHIP_ID:u8 = 0x60;
 
@@ -117,6 +117,16 @@ where
 
         Ok(id == BMP390_CHIP_ID)
     }
+
+    pub async fn error_flags(&mut self) -> Bmp390Result<ErrorFlags, B::Error> {
+        Ok(self.bus.read::<ErrReg>().await?)
+    }
+    
+    pub async fn status(&mut self) -> Bmp390Result<StatusFlags, B::Error> {
+        Ok(self.bus.read::<Status>().await?)
+    }
+    
+    
 
     /// Sets the power mode of the device by writing to the PwrCtrl (0x1B) register
     ///
