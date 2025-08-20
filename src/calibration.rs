@@ -1,4 +1,4 @@
-use crate::{register, Bmp390Error, Bmp390Result};
+use crate::{register, Bmp390Result};
 use crate::bus::Bus;
 
 pub struct CalibrationData {
@@ -21,9 +21,7 @@ pub struct CalibrationData {
 
 impl CalibrationData {
     pub async fn new<B: Bus>(bus: &mut B) -> Bmp390Result<Self, B::Error> {
-        let mut buf = [0u8; 21];
         let calib_coeffs = bus.read::<register::calibration::Calibration>().await?;
-
 
         Ok(Self {
             par_t1: (calib_coeffs.nvm_par_t1 as f32) / 0.00390625,
@@ -71,22 +69,6 @@ impl CalibrationData {
         let partial_data3 = partial_data1 * partial_data2;
         let partial_data4 = partial_data3 + (pressure * pressure * pressure) * self.par_p11;
         partial_out1 + partial_out2 + partial_data4
-    }
-}
-
-#[inline]
-const fn pow2f(e: i32) -> f32 {
-    match e {
-        // Normal numbers: exponent E = e + 127, mantissa = 0
-        -126..=127 => f32::from_bits(((e + 127) as u32) << 23),
-
-        // Subnormals: exponent bits = 0, value = F * 2^-149
-        // Choose F = 1 << (e + 149) so value = 2^e
-        -149..=-127 => f32::from_bits(1u32 << (e + 149)),
-
-        // Underflow / overflow
-        e if e < -149 => 0.0,
-        _ => f32::INFINITY,
     }
 }
 

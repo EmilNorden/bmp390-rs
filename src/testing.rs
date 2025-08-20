@@ -34,7 +34,7 @@ impl<const N: usize> Bus for FakeBus<'_, N> {
         panic!("No mocked value for register {}", R::ADDR)
     }
 
-    async fn write<W: Writable>(&mut self, v: &W::In) -> Result<(), Bmp390Error<Self::Error>> {
+    async fn write<W: Writable>(&mut self, _: &W::In) -> Result<(), Bmp390Error<Self::Error>> {
         todo!()
     }
 }

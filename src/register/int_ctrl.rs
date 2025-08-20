@@ -74,6 +74,7 @@ mod tests {
         assert!(reg.drdy_en);
     }
 
+    #[test]
     fn int_ctrl_encode() {
         let mut buffer = [0u8; 1];
         IntCtrl::encode(&IntCtrlCfg {

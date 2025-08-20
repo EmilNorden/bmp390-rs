@@ -9,8 +9,3 @@ impl Readable for FifoData {
         Ok(b[0])
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-}

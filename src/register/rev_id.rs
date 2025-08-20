@@ -1,4 +1,3 @@
-use crate::Bmp390;
 use crate::register::{InvalidRegisterField, Readable, Reg};
 
 /// Marker struct for the REV_ID (0x01) register
