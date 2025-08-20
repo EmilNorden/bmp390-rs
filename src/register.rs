@@ -73,9 +73,29 @@ pub struct ErrReg;
 impl Reg for ErrReg {  const ADDR:u8 = 0x02; }
 
 pub struct ErrorFlags {
-    pub fatal_err: bool,
-    pub cmd_err: bool,
-    pub conf_err: bool,
+    fatal_err: bool,
+    cmd_err: bool,
+    conf_err: bool,
+}
+
+impl ErrorFlags {
+    pub fn new(fatal_err: bool, cmd_err: bool, conf_err: bool) -> Self {
+        Self { fatal_err, cmd_err, conf_err }
+    }
+
+    /// A fatal error occurred.
+    pub fn fatal_error(&self) -> bool { self.fatal_err }
+
+    /// Command execution failed.
+    ///
+    /// This value is cleared on **register** read.
+    pub fn command_error(&self) -> bool { self.cmd_err }
+
+    /// Sensor configuration error detected.
+    ///
+    /// This can only happen in [`Normal´] power mode.
+    /// This value is cleared on **register** read.
+    pub fn configuration_error(&self) -> bool { self.conf_err }
 }
 impl Readable for ErrReg {
     type Out = ErrorFlags;
@@ -100,9 +120,30 @@ pub struct Status;
 impl Reg for Status { const ADDR: u8 = 0x03; }
 
 pub struct StatusFlags {
-    pub cmd_rdy: bool,
-    pub drdy_press: bool,
-    pub drdy_temp: bool,
+    cmd_rdy: bool,
+    drdy_press: bool,
+    drdy_temp: bool,
+}
+
+impl StatusFlags {
+    pub fn new(cmd_rdy: bool, drdy_press: bool, drdy_temp: bool) -> Self {
+        Self { cmd_rdy, drdy_press, drdy_temp }
+    }
+
+    /// Is the command decoder ready to accept a new command?
+    ///
+    /// [`false`] means that a command is already in progress.
+    pub fn command_decoder_ready(&self) -> bool { self.cmd_rdy }
+
+    /// Is there new pressure data to be read?
+    ///
+    /// This value is cleared when any of the pressure DATA registers are read.
+    pub fn pressure_data_ready(&self) -> bool { self.drdy_press }
+
+    /// Is there new temperature data to be read?
+    ///
+    /// This value is cleared when any of the temperature DATA registers are read.
+    pub fn temperature_data_ready(&self) -> bool { self.drdy_temp }
 }
 
 impl Readable for Status {
@@ -131,8 +172,20 @@ pub struct Measurement;
 impl Reg for Measurement { const ADDR: u8 = 0x04;}
 
 pub struct MeasurementData {
-    pub pressure: u32,
-    pub temperature: u32,
+    pressure: u32,
+    temperature: u32,
+}
+
+impl MeasurementData {
+    pub fn new(pressure: u32, temperature: u32) -> Self {
+        Self { pressure, temperature }
+    }
+
+    /// Returns the raw uncalibrated pressure data from the DATA_0, DATA_1 and DATA_2 registers
+    pub fn pressure(&self) -> u32 { self.pressure }
+
+    /// Returns the raw uncalibrated temperature data from the DATA_3, DATA_4 and DATA_5 registers
+    pub fn temperature(&self) -> u32 { self.temperature }
 }
 
 impl Readable for Measurement {
@@ -159,12 +212,36 @@ impl Readable for SensorTime {
     }
 }
 
+/// Marker struct for the EVENT (0x10) register
+///
+/// - **Length:** 1 byte
+/// - **Access:** Read-only
+///
+/// Used with [`Bmp390::read::<Event>()`] or the convenience method
+/// [`Bmp390::status`].
 pub struct Event;
 impl Reg for Event { const ADDR: u8 = 0x10;}
 
 pub struct EventFlags {
     por_detected: bool,
     itf_act_pt: bool,
+}
+
+impl EventFlags {
+    pub fn new(por_detected: bool, itf_act_pt: bool) -> Self {
+        Self { por_detected, itf_act_pt }
+    }
+
+    /// Returns [`true`] after device power-up or after a soft-reset.
+    ///
+    /// This value is cleared on **register** read.
+    pub fn power_on_reset_detected(&self) -> bool { self.por_detected }
+
+    /// Returns [`true`] if a serial interface transaction has occurred
+    /// during a pressure or temperature conversion.
+    ///
+    /// This value is cleared on **register** read.
+    pub fn transaction_on_pt_conversion(&self) -> bool { self.itf_act_pt }
 }
 
 impl Readable for Event {
@@ -182,9 +259,29 @@ pub struct IntStatus;
 impl Reg for IntStatus { const ADDR: u8 = 0x11; }
 
 pub struct IntStatusFlags {
-    pub fwm_int: bool,
-    pub ffull_int: bool,
-    pub drdy: bool,
+    fwm_int: bool,
+    ffull_int: bool,
+    drdy: bool,
+}
+
+impl IntStatusFlags {
+    pub fn new(fwm_int: bool, ffull_int: bool, drdy: bool) -> Self {
+        Self { fwm_int, ffull_int, drdy }
+    }
+    /// Has a FIFO watermark interrupt triggered?
+    ///
+    /// This value is cleared on **register** read.
+    pub fn fifo_watermark_interrupt(&self) -> bool { self.fwm_int }
+
+    /// Has a FIFO full interrupt triggered?
+    ///
+    /// This value is cleared on **register** read.
+    pub fn fifo_full_interrupt(&self) -> bool { self.ffull_int }
+
+    /// Has a data ready interrupt triggered?
+    ///
+    /// This value is cleared on **register** read.
+    pub fn data_ready_interrupt(&self) -> bool { self.drdy }
 }
 
 impl Readable for IntStatus {
@@ -205,6 +302,8 @@ impl Reg for FifoLength { const ADDR: u8 = 0x12; }
 impl Readable for FifoLength {
     type Out = u16;
 
+    const N: usize = 2;
+
     fn decode(b: &[u8]) -> Result<Self::Out, InvalidRegisterField> {
         Ok(u16::from_le_bytes([b[0], b[1] & 0b0000_0001]))
     }
@@ -220,14 +319,26 @@ impl Readable for FifoData {
     }
 }
 
-pub struct FifoWatermark;
-impl Reg for FifoWatermark { const ADDR: u8 = 0x15; }
+pub struct FifoWtm;
+impl Reg for FifoWtm { const ADDR: u8 = 0x15; }
 
-impl Readable for FifoWatermark {
+impl Readable for FifoWtm {
     type Out = u16;
+
+    const N: usize = 2;
 
     fn decode(b: &[u8]) -> Result<Self::Out, InvalidRegisterField> {
         Ok(u16::from_le_bytes([b[0], b[1] & 0b0000_0001]))
+    }
+}
+
+impl Writable for FifoWtm {
+    type In = u16;
+    const N: usize = 2;
+
+    fn encode(v: &Self::In, out: &mut [u8]) {
+        out[0] = (v & 0xFF) as u8;
+        out[1] = ((v >> 8) & 1u16) as u8;
     }
 }
 
@@ -278,7 +389,7 @@ pub struct FifoConfig2Fields {
     data_select: FifoDataSource,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum FifoDataSource {
     Unfiltered = 0,
     Filtered = 1,
@@ -371,7 +482,7 @@ pub struct IfConfFields {
     i2c_wdt_sel: I2cWatchdogTimer,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum I2cWatchdogTimer {
     WdtShort = 0,
     WdtLong = 1,
@@ -602,7 +713,7 @@ impl Writable for Cmd {
 /// This enum defines the different output data rates that can be set in the ODR (0x1D) register.
 ///
 /// You can find more information under section 4.3.19 in the datasheet.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum OutputDataRate {
     R200Hz      = 0x00,
     R100Hz      = 0x01,
@@ -658,7 +769,7 @@ impl Into<u8> for OutputDataRate {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum IIRFilterCoefficient {
     Coef0   = 0b000,
     Coef1   = 0b001,
@@ -707,7 +818,7 @@ impl IIRFilterCoefficient {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Oversampling {
     X1,
     X2,
@@ -777,44 +888,426 @@ impl Into<u8> for PowerMode {
         }
     }
 }
-/*
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum Register {
-    ChipId                  = 0x00,
-    RevId                   = 0x01,
-    ErrReg                  = 0x02,
-    Status                  = 0x03,
-    Data0                   = 0x04,
-    Data1                   = 0x05,
-    Data2                   = 0x06,
-    Data3                   = 0x07,
-    Data4                   = 0x08,
-    Data5                   = 0x09,
-    SensorTime0             = 0x0C,
-    SensorTime1             = 0x0D,
-    SensorTime2             = 0x0E,
-    Event                   = 0x10,
-    IntStatus               = 0x11,
-    FifoLength0             = 0x12,
-    FifoLength1             = 0x13,
-    FifoData                = 0x14,
-    FifoWatemark0           = 0x15,
-    FifoWatemark1           = 0x16,
-    FifoConfig1             = 0x17,
-    FifoConfig2             = 0x18,
-    IntCtrl                 = 0x19,
-    IfConfig                = 0x1A,
-    PwrCtrl                 = 0x1B,
-    Osr                     = 0x1C,
-    Odr                     = 0x1D,
-    Config                  = 0x1F,
-    CalibrationDataStart    = 0x31,
-    // 0x30...0x57 calibration data.
-    Cmd                     = 0x7E,
-}
 
-impl Register {
-    pub(crate) fn addr(&self) -> u8 {
-        *self as u8
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn err_reg_decode() {
+        let reg = ErrReg::decode(&[0b001]).unwrap();
+        assert_eq!([true, false, false], [reg.fatal_err, reg.cmd_err, reg.conf_err]);
+
+        let reg = ErrReg::decode(&[0b010]).unwrap();
+        assert_eq!([false, true, false], [reg.fatal_err, reg.cmd_err, reg.conf_err]);
+
+        let reg = ErrReg::decode(&[0b100]).unwrap();
+        assert_eq!([false, false, true], [reg.fatal_err, reg.cmd_err, reg.conf_err]);
     }
-}*/
+
+    #[test]
+    fn status_decode() {
+        let reg = Status::decode(&[0b0010000]).unwrap();
+        assert_eq!([true, false, false], [reg.cmd_rdy, reg.drdy_press, reg.drdy_temp]);
+
+        let reg = Status::decode(&[0b0100000]).unwrap();
+        assert_eq!([false, true, false], [reg.cmd_rdy, reg.drdy_press, reg.drdy_temp]);
+
+        let reg = Status::decode(&[0b1000000]).unwrap();
+        assert_eq!([false, false, true], [reg.cmd_rdy, reg.drdy_press, reg.drdy_temp]);
+    }
+
+    #[test]
+    fn measurement_decode() {
+        let reg = Measurement::decode(&[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]).unwrap();
+
+        assert_eq!(0xCCBBAA, reg.pressure);
+        assert_eq!(0xFFEEDD, reg.temperature);
+    }
+
+    #[test]
+    fn sensor_time_decode() {
+        let reg = SensorTime::decode(&[0xAA, 0xBB, 0xCC]).unwrap();
+
+        assert_eq!(0xCCBBAA, reg);
+    }
+
+    #[test]
+    fn event_decode() {
+        let reg = Event::decode(&[0b01]).unwrap();
+        assert!(reg.por_detected);
+
+        let reg = Event::decode(&[0b10]).unwrap();
+        assert!(reg.itf_act_pt);
+    }
+
+    #[test]
+    fn int_status_decode() {
+        let reg = IntStatus::decode(&[0b0001]).unwrap();
+        assert!(reg.fwm_int);
+
+        let reg = IntStatus::decode(&[0b0010]).unwrap();
+        assert!(reg.ffull_int);
+
+        let reg = IntStatus::decode(&[0b1000]).unwrap();
+        assert!(reg.drdy);
+    }
+
+    #[test]
+    fn fifo_length_decode() {
+        let reg = FifoLength::decode(&[0xFF, 0x01]).unwrap();
+
+        assert_eq!(511, reg);
+    }
+
+    #[test]
+    fn fifo_wtm_decode() {
+        let reg = FifoWtm::decode(&[0xFF, 0x01]).unwrap();
+
+        assert_eq!(511, reg);
+    }
+
+    #[test]
+    fn fifo_wtm_encode() {
+        let mut buffer = [0u8; 2];
+        FifoWtm::encode(&511, &mut buffer);
+
+        assert_eq!(buffer, [0xFF, 0x01]);
+    }
+
+    #[test]
+    fn fifo_config1_decode() {
+        let reg = FifoConfig1::decode(&[0b00001]).unwrap();
+        assert!(reg.fifo_mode);
+
+        let reg = FifoConfig1::decode(&[0b00010]).unwrap();
+        assert!(reg.fifo_stop_on_full);
+
+        let reg = FifoConfig1::decode(&[0b00100]).unwrap();
+        assert!(reg.fifo_time_en);
+
+        let reg = FifoConfig1::decode(&[0b01000]).unwrap();
+        assert!(reg.fifo_press_en);
+
+        let reg = FifoConfig1::decode(&[0b10000]).unwrap();
+        assert!(reg.fifo_temp_en);
+    }
+
+    #[test]
+    fn fifo_config1_encode() {
+        let mut buffer = [0u8; 1];
+
+        FifoConfig1::encode(&FifoConfig1Fields {
+            fifo_mode: false,
+            fifo_stop_on_full: false,
+            fifo_time_en: false,
+            fifo_press_en: false,
+            fifo_temp_en: false,
+        }, &mut buffer);
+        assert_eq!([0], buffer);
+
+        FifoConfig1::encode(&FifoConfig1Fields {
+            fifo_mode: true,
+            fifo_stop_on_full: false,
+            fifo_time_en: true,
+            fifo_press_en: false,
+            fifo_temp_en: true,
+        }, &mut buffer);
+        assert_eq!([0b10101], buffer)
+    }
+
+    #[test]
+    fn fifo_config2_decode() {
+        let reg = FifoConfig2::decode(&[0b000_0100]).unwrap();
+        assert_eq!(0b100, reg.fifo_subsampling);
+        assert_eq!(FifoDataSource::Unfiltered, reg.data_select);
+
+        let reg = FifoConfig2::decode(&[0b000_1010]).unwrap();
+        assert_eq!(0b010, reg.fifo_subsampling);
+        assert_eq!(FifoDataSource::Filtered, reg.data_select);
+
+        let reg = FifoConfig2::decode(&[0b001_1000]).unwrap();
+        assert_eq!(0, reg.fifo_subsampling);
+        assert_eq!(FifoDataSource::Reserved, reg.data_select);
+    }
+
+    #[test]
+    fn int_ctrl_decode() {
+        let reg = IntCtrl::decode(&[0b0000_0001]).unwrap();
+        assert!(reg.int_od);
+
+        let reg = IntCtrl::decode(&[0b0000_0010]).unwrap();
+        assert!(reg.int_level);
+
+        let reg = IntCtrl::decode(&[0b0000_0100]).unwrap();
+        assert!(reg.int_latch);
+
+        let reg = IntCtrl::decode(&[0b0000_1000]).unwrap();
+        assert!(reg.fwtm_en);
+
+        let reg = IntCtrl::decode(&[0b0001_0000]).unwrap();
+        assert!(reg.ffull_en);
+
+        let reg = IntCtrl::decode(&[0b0010_0000]).unwrap();
+        assert!(reg.int_ds);
+
+        let reg = IntCtrl::decode(&[0b0100_0000]).unwrap();
+        assert!(reg.drdy_en);
+    }
+
+    fn int_ctrl_encode() {
+        let mut buffer = [0u8; 1];
+        IntCtrl::encode(&IntCtrlCfg {
+            int_od: true,
+            int_level: false,
+            int_latch: false,
+            fwtm_en: false,
+            ffull_en: false,
+            int_ds: false,
+            drdy_en: false,
+        }, &mut buffer);
+        assert_eq!([0b0000_0001], buffer);
+
+        IntCtrl::encode(&IntCtrlCfg {
+            int_od: false,
+            int_level: true,
+            int_latch: false,
+            fwtm_en: false,
+            ffull_en: false,
+            int_ds: false,
+            drdy_en: false,
+        }, &mut buffer);
+        assert_eq!([0b0000_0010], buffer);
+
+        IntCtrl::encode(&IntCtrlCfg {
+            int_od: false,
+            int_level: false,
+            int_latch: true,
+            fwtm_en: false,
+            ffull_en: false,
+            int_ds: false,
+            drdy_en: false,
+        }, &mut buffer);
+        assert_eq!([0b0000_0100], buffer);
+
+        IntCtrl::encode(&IntCtrlCfg {
+            int_od: false,
+            int_level: false,
+            int_latch: false,
+            fwtm_en: true,
+            ffull_en: false,
+            int_ds: false,
+            drdy_en: false,
+        }, &mut buffer);
+        assert_eq!([0b0000_1000], buffer);
+
+        IntCtrl::encode(&IntCtrlCfg {
+            int_od: false,
+            int_level: false,
+            int_latch: false,
+            fwtm_en: false,
+            ffull_en: true,
+            int_ds: false,
+            drdy_en: false,
+        }, &mut buffer);
+        assert_eq!([0b0001_0000], buffer);
+
+        IntCtrl::encode(&IntCtrlCfg {
+            int_od: false,
+            int_level: false,
+            int_latch: false,
+            fwtm_en: false,
+            ffull_en: false,
+            int_ds: true,
+            drdy_en: false,
+        }, &mut buffer);
+        assert_eq!([0b0010_0000], buffer);
+
+        IntCtrl::encode(&IntCtrlCfg {
+            int_od: false,
+            int_level: false,
+            int_latch: false,
+            fwtm_en: false,
+            ffull_en: false,
+            int_ds: false,
+            drdy_en: true,
+        }, &mut buffer);
+        assert_eq!([0b0100_0000], buffer);
+    }
+
+    #[test]
+    fn if_conf_decode() {
+        let reg = IfConf::decode(&[0b0000_0001]).unwrap();
+        assert!(reg.spi3);
+        assert_eq!(I2cWatchdogTimer::WdtShort, reg.i2c_wdt_sel);
+
+        let reg = IfConf::decode(&[0b0000_0010]).unwrap();
+        assert!(reg.i2c_wdt_en);
+
+        let reg = IfConf::decode(&[0b0000_0100]).unwrap();
+        assert_eq!(I2cWatchdogTimer::WdtLong, reg.i2c_wdt_sel);
+    }
+
+    #[test]
+    fn if_conf_encode() {
+        let mut buffer = [0u8; 1];
+
+        IfConf::encode(&IfConfFields {
+            spi3: false,
+            i2c_wdt_en: false,
+            i2c_wdt_sel: I2cWatchdogTimer::WdtShort,
+        }, &mut buffer);
+        assert_eq!([0b0000_0000], buffer);
+
+        IfConf::encode(&IfConfFields {
+            spi3: true,
+            i2c_wdt_en: false,
+            i2c_wdt_sel: I2cWatchdogTimer::WdtLong,
+        }, &mut buffer);
+        assert_eq!([0b0000_0101], buffer);
+
+        IfConf::encode(&IfConfFields {
+            spi3: true,
+            i2c_wdt_en: true,
+            i2c_wdt_sel: I2cWatchdogTimer::WdtLong,
+        }, &mut buffer);
+        assert_eq!([0b0000_0111], buffer);
+    }
+
+    #[test]
+    fn pwr_ctrl_decode() {
+        let reg = PwrCtrl::decode(&[0b0000_0001]).unwrap();
+        assert!(reg.press_en);
+        assert_eq!(PowerMode::Sleep, reg.mode);
+
+        let reg = PwrCtrl::decode(&[0b0001_0010]).unwrap();
+        assert!(reg.temp_en);
+        assert_eq!(PowerMode::Forced, reg.mode);
+
+        let reg = PwrCtrl::decode(&[0b0010_0000]).unwrap();
+        assert!(!reg.press_en);
+        assert!(!reg.temp_en);
+        assert_eq!(PowerMode::Forced, reg.mode);
+
+        let reg = PwrCtrl::decode(&[0b0011_0000]).unwrap();
+
+        assert_eq!(PowerMode::Normal, reg.mode);
+    }
+
+    #[test]
+    fn pwr_ctrl_encode() {
+        let mut buffer = [0u8; 1];
+        PwrCtrl::encode(&PwrCtrlCfg {
+            press_en: false,
+            temp_en: false,
+            mode: PowerMode::Sleep,
+        }, &mut buffer);
+        assert_eq!([0b0000_0000], buffer);
+
+        PwrCtrl::encode(&PwrCtrlCfg {
+            press_en: true,
+            temp_en: false,
+            mode: PowerMode::Forced,
+        }, &mut buffer);
+        assert_eq!([0b0001_0001], buffer);
+
+        PwrCtrl::encode(&PwrCtrlCfg {
+            press_en: false,
+            temp_en: true,
+            mode: PowerMode::Normal,
+        }, &mut buffer);
+        assert_eq!([0b0011_0010], buffer);
+    }
+
+    #[test]
+    fn osr_decode() {
+        let reg = Osr::decode(&[0b0000_0000]).unwrap();
+        assert_eq!(Oversampling::X1, reg.osr_p);
+        assert_eq!(Oversampling::X1, reg.osr_t);
+
+        let reg = Osr::decode(&[0b0000_0001]).unwrap();
+        assert_eq!(Oversampling::X2, reg.osr_p);
+        assert_eq!(Oversampling::X1, reg.osr_t);
+
+        let reg = Osr::decode(&[0b0000_1000]).unwrap();
+        assert_eq!(Oversampling::X1, reg.osr_p);
+        assert_eq!(Oversampling::X2, reg.osr_t);
+    }
+
+    #[test]
+    fn osr_encode() {
+        let mut buffer = [0u8; 1];
+        Osr::encode(&OsrCfg {
+            osr_p: Oversampling::X1,
+            osr_t: Oversampling::X1,
+        }, &mut buffer);
+        assert_eq!([0b0000_0000], buffer);
+
+        Osr::encode(&OsrCfg {
+            osr_p: Oversampling::X2,
+            osr_t: Oversampling::X1,
+        }, &mut buffer);
+        assert_eq!([0b0000_0001], buffer);
+
+        Osr::encode(&OsrCfg {
+            osr_p: Oversampling::X1,
+            osr_t: Oversampling::X2,
+        }, &mut buffer);
+        assert_eq!([0b0000_1000], buffer);
+    }
+
+    #[test]
+    fn odr_decode() {
+        let reg = Odr::decode(&[0b0000_0000]).unwrap();
+        assert_eq!(OutputDataRate::R200Hz, reg.odr_sel);
+
+        let reg = Odr::decode(&[0b0000_0001]).unwrap();
+        assert_eq!(OutputDataRate::R100Hz, reg.odr_sel);
+    }
+
+    #[test]
+    fn odr_encode() {
+        let mut buffer = [0u8; 1];
+        Odr::encode(&OdrCfg {
+            odr_sel: OutputDataRate::R200Hz,
+        }, &mut buffer);
+        assert_eq!([0b0000_0000], buffer);
+
+        Odr::encode(&OdrCfg {
+            odr_sel: OutputDataRate::R100Hz,
+        }, &mut buffer);
+        assert_eq!([0b0000_0001], buffer);
+    }
+
+    #[test]
+    fn config_decode() {
+        let reg = Config::decode(&[0b0000_0000]).unwrap();
+        assert_eq!(IIRFilterCoefficient::Coef0, reg.iir_filter);
+
+        let reg = Config::decode(&[0b0000_0010]).unwrap();
+        assert_eq!(IIRFilterCoefficient::Coef1, reg.iir_filter);
+    }
+
+    #[test]
+    fn config_encode() {
+        let mut buffer = [0u8; 1];
+        Config::encode(&ConfigFields {
+            iir_filter: IIRFilterCoefficient::Coef0,
+        }, &mut buffer);
+        assert_eq!([0b0000_0000], buffer);
+
+        Config::encode(&ConfigFields {
+            iir_filter: IIRFilterCoefficient::Coef1,
+        }, &mut buffer);
+        assert_eq!([0b0000_0010], buffer);
+    }
+
+    #[test]
+    fn cmd_encode() {
+        let mut buffer = [0u8; 1];
+        Cmd::encode(&CmdData::FifoFlush, &mut buffer);
+        assert_eq!([0xB0], buffer);
+
+        Cmd::encode(&CmdData::SoftReset, &mut buffer);
+        assert_eq!([0xB6], buffer);
+    }
+}

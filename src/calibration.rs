@@ -92,62 +92,19 @@ const fn pow2f(e: i32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use smallvec::SmallVec;
     use crate::bus::Bus;
-    use crate::register::{Readable, Writable};
+    use crate::register::{Calibration, Readable, Reg, Writable};
+    use crate::testing::FakeBus;
     use super::*;
 
-    struct FakeBus<'a> {
-        pub data: &'a [u8],
-        pub read_bytes: usize,
-        // TODO Replace this field
-        // pub read_registers: SmallVec<[Register; 10]>,
-    }
 
-    impl<'a> FakeBus<'a> {
-        pub fn new(data: &'a[u8]) -> Self {
-            FakeBus {
-                data,
-                read_bytes: 0,
-                //read_registers: SmallVec::new(),
-            }
-        }
-    }
-
-    impl Bus for FakeBus<'_> {
-        type Error = ();
-/*
-        async fn write_register(&mut self, reg: Register, data: u8) -> Result<(), Bmp390Error<Self::Error>> {
-            todo!()
-        }
-
-        async fn read_register(&mut self, reg: Register, data: &mut [u8]) -> Result<(), Bmp390Error<Self::Error>> {
-            self.read_registers.push(reg);
-            data.copy_from_slice(&self.data[self.read_bytes..self.read_bytes + data.len()]);
-            self.read_bytes += data.len();
-
-            Ok(())
-        }
-*/
-        async fn read<R: Readable>(&mut self) -> Result<R::Out, Bmp390Error<Self::Error>> {
-            todo!()
-        }
-
-        async fn write<W: Writable>(&mut self, v: &W::In) -> Result<(), Bmp390Error<Self::Error>> {
-            todo!()
-        }
-    }
-    
     #[tokio::test]
     async fn test_load_calibration() {
-        let mut bus = FakeBus::new(&[
-            0x12, 0x34, 0x56, 0x78, 0x1, 0xA, 0x1, 0xAB, 0xCD, 0x42, 0xFF, 0xEF, 0xBE, 0xAD, 0xB, 0x2, 0xE7, 0xFE, 0xFE, 0x80, 0x40
-        ]);
+        let mut bus: FakeBus<'_, 10> = FakeBus::new();
+        bus.mock_register(Calibration::ADDR,
+                          &[0x12, 0x34, 0x56, 0x78, 0x1, 0xA, 0x1, 0xAB, 0xCD, 0x42, 0xFF, 0xEF, 0xBE, 0xAD, 0xB, 0x2, 0xE7, 0xFE, 0xFE, 0x80, 0x40]);
 
         let cb = CalibrationData::new(&mut bus).await.unwrap();
-
-        //assert_eq!(bus.read_registers.len(), 1);
-        //assert_eq!(bus.read_registers[0], Register::CalibrationDataStart);
 
         assert_eq!(cb.par_t1, 3412480.0);
         assert_eq!(cb.par_t2, 2.8690323e-5);

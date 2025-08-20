@@ -5,6 +5,8 @@ pub mod register;
 pub mod bus;
 mod calibration;
 
+pub mod testing;
+
 use core::fmt::{Debug};
 use embedded_hal_async::delay::DelayNs;
 use embedded_hal_async::i2c::SevenBitAddress;
@@ -118,15 +120,17 @@ where
         Ok(id == BMP390_CHIP_ID)
     }
 
+    /// Returns the error flags from the ERR_REG (0x02) register.
+    ///
+    /// These flags are
     pub async fn error_flags(&mut self) -> Bmp390Result<ErrorFlags, B::Error> {
         Ok(self.bus.read::<ErrReg>().await?)
     }
-    
+
+    /// Returns the status from the STATUS (0x03) register.
     pub async fn status(&mut self) -> Bmp390Result<StatusFlags, B::Error> {
         Ok(self.bus.read::<Status>().await?)
     }
-    
-    
 
     /// Sets the power mode of the device by writing to the PwrCtrl (0x1B) register
     ///
@@ -143,7 +147,11 @@ where
     /// # Examples
     ///
     /// ```rust, no_run
-    /// device.set_mode(PowerMode::Normal).await?
+    /// # tokio_test::block_on(async {
+    /// use bmp390_rs::register::PowerMode;
+    /// # let mut device = bmp390_rs::testing::dummy_device().await;
+    /// device.set_mode(PowerMode::Normal).await;
+    /// # });
     pub async fn set_mode(&mut self, mode: register::PowerMode) -> Bmp390Result<(), B::Error> {
         let mut pwr_ctrl = self.bus.read::<register::PwrCtrl>().await?;
         pwr_ctrl.mode = mode;
@@ -155,18 +163,33 @@ where
     /// # Examples
     ///
     /// ```rust, no_run
-    /// device.mode()?
+    /// # tokio_test::block_on(async {
+    /// # let mut device = bmp390_rs::testing::dummy_device().await;
+    /// device.mode().await;
+    /// # });
     pub async fn mode(&mut self) -> Bmp390Result<register::PowerMode, B::Error> {
         Ok(self.bus.read::<register::PwrCtrl>().await?.mode)
     }
 
+    /// Reads the **calibrated** pressure and temperature from the data (0x04 - 0x09) registers.
+    /// This method will read data from these registers and calibrate them using the NVM-stored calibration coefficients
+    /// before returning them to the caller.
+    ///
+    /// # Examples
+    ///
+    /// ```rust, no_run
+    /// # tokio_test::block_on(async {
+    /// # let mut device = bmp390_rs::testing::dummy_device().await;
+    /// let data = device.read_sensor_data().await.unwrap();
+    /// println!("The current pressure and temperature is {} and {}", data.pressure, data.temperature);
+    /// # });
     pub async fn read_sensor_data(&mut self) -> Bmp390Result<Measurement, B::Error> {
         let measurement = self.bus.read::<register::Measurement>().await?;
 
         let compensated_temperature =
-            self.calibration_data.compensate_temperature(measurement.temperature);
+            self.calibration_data.compensate_temperature(measurement.temperature());
         let compensated_pressure =
-            self.calibration_data.compensate_pressure(measurement.pressure);
+            self.calibration_data.compensate_pressure(measurement.pressure());
 
         Ok(Measurement {
             pressure: compensated_pressure,
@@ -177,6 +200,7 @@ where
 
 }
 
+/// Holds calibrated pressure and temperature samples.
 pub struct Measurement {
     pub pressure: f32,
     pub temperature: f32,
