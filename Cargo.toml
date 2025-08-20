@@ -2,12 +2,16 @@
 name = "bmp390-rs"
 version = "0.1.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
+keywords = ["embedded-hal", "pressure", "sensor", "altitude", "async"]
+description = "Async driver for the BMP390 pressure sensor that supports both I2C and SPI"
+repository = "https://github.com/EmilNorden/bmp390-rs"
+categories = ["aerospace", "asynchronous", "embedded", "hardware-support", "no-std"]
 
 [dependencies]
 embedded-hal-async = { version = "1.0.0", optional = true}
 embedded-hal = {version = "1.0.0", optional = true}
 embassy-time = "0.4.0"
-async-trait = "0.1.89"
 heapless = "0.8.0"
 
 [dev-dependencies]
