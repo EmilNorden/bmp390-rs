@@ -22,7 +22,7 @@ pub struct CalibrationData {
 impl CalibrationData {
     pub async fn new<B: Bus>(bus: &mut B) -> Bmp390Result<Self, B::Error> {
         let mut buf = [0u8; 21];
-        let calib_coeffs = bus.read::<register::Calibration>().await?;
+        let calib_coeffs = bus.read::<register::calibration::Calibration>().await?;
 
 
         Ok(Self {
@@ -92,8 +92,7 @@ const fn pow2f(e: i32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use crate::bus::Bus;
-    use crate::register::{Calibration, Readable, Reg, Writable};
+    use crate::register::{calibration, Reg};
     use crate::testing::FakeBus;
     use super::*;
 
@@ -101,7 +100,7 @@ mod tests {
     #[tokio::test]
     async fn test_load_calibration() {
         let mut bus: FakeBus<'_, 10> = FakeBus::new();
-        bus.mock_register(Calibration::ADDR,
+        bus.mock_register(calibration::Calibration::ADDR,
                           &[0x12, 0x34, 0x56, 0x78, 0x1, 0xA, 0x1, 0xAB, 0xCD, 0x42, 0xFF, 0xEF, 0xBE, 0xAD, 0xB, 0x2, 0xE7, 0xFE, 0xFE, 0x80, 0x40]);
 
         let cb = CalibrationData::new(&mut bus).await.unwrap();
