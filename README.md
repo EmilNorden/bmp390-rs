@@ -48,6 +48,7 @@ async fn main() {
         println!("Pressure: {:?} temp: {:?}", reading.pressure, reading.temperature);
     }
 }
+```
 
 ## License
 
