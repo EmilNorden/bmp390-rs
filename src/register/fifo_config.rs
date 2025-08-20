@@ -3,6 +3,7 @@ use crate::register::{InvalidRegisterField, Readable, Reg, Writable};
 pub struct FifoConfig1;
 impl Reg for FifoConfig1 { const ADDR: u8 = 0x17; }
 
+#[derive(Copy, Clone, Debug)]
 pub struct FifoConfig1Fields {
     pub fifo_mode: bool,
     pub fifo_stop_on_full: bool,
@@ -42,6 +43,7 @@ impl Writable for FifoConfig1 {
 pub struct FifoConfig2;
 impl Reg for FifoConfig2 { const ADDR: u8 = 0x18; }
 
+#[derive(Copy, Clone, Debug)]
 pub struct FifoConfig2Fields {
     fifo_subsampling: u8,
     data_select: FifoDataSource,

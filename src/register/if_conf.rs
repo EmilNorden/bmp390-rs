@@ -3,10 +3,11 @@ use crate::register::{InvalidRegisterField, Readable, Reg, Writable};
 pub struct IfConf;
 impl Reg for IfConf { const ADDR: u8 = 0x1A; }
 
+#[derive(Copy, Clone, Debug)]
 pub struct IfConfFields {
-    spi3: bool,
-    i2c_wdt_en: bool,
-    i2c_wdt_sel: I2cWatchdogTimer,
+    pub spi3: bool,
+    pub i2c_wdt_en: bool,
+    pub i2c_wdt_sel: I2cWatchdogTimer,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]

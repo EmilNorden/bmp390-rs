@@ -3,6 +3,7 @@ use crate::register::{InvalidRegisterField, Readable, Reg};
 pub struct Calibration;
 impl Reg for Calibration { const ADDR:u8 = 0x31; }
 
+#[derive(Copy, Clone, Debug)]
 pub struct CalibrationNvm {
     pub(crate) nvm_par_t1: u16,
     pub(crate) nvm_par_t2: u16,

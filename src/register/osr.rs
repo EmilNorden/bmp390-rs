@@ -3,6 +3,7 @@ use crate::register::{InvalidRegisterField, Readable, Reg, UnexpectedValue, Writ
 pub struct Osr;
 impl Reg for Osr { const ADDR:u8 = 0x1C; }
 
+#[derive(Copy, Clone, Debug)]
 pub struct OsrCfg {
     pub osr_p: Oversampling,
     pub osr_t: Oversampling,

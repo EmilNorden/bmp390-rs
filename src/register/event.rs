@@ -10,26 +10,18 @@ use crate::register::{InvalidRegisterField, Readable, Reg};
 pub struct Event;
 impl Reg for Event { const ADDR: u8 = 0x10;}
 
+#[derive(Copy, Clone, Debug)]
 pub struct EventFlags {
-    por_detected: bool,
-    itf_act_pt: bool,
-}
-
-impl EventFlags {
-    pub fn new(por_detected: bool, itf_act_pt: bool) -> Self {
-        Self { por_detected, itf_act_pt }
-    }
-
     /// Returns [`true`] after device power-up or after a soft-reset.
     ///
     /// This value is cleared on **register** read.
-    pub fn power_on_reset_detected(&self) -> bool { self.por_detected }
+    por_detected: bool,
 
     /// Returns [`true`] if a serial interface transaction has occurred
     /// during a pressure or temperature conversion.
     ///
     /// This value is cleared on **register** read.
-    pub fn transaction_on_pt_conversion(&self) -> bool { self.itf_act_pt }
+    itf_act_pt: bool,
 }
 
 impl Readable for Event {

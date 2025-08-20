@@ -3,6 +3,7 @@ use crate::register::{InvalidRegisterField, Readable, Reg, UnexpectedValue, Writ
 pub struct Odr;
 impl Reg for Odr { const ADDR:u8 = 0x1D; }
 
+#[derive(Copy, Clone, Debug)]
 pub struct OdrCfg {
     pub odr_sel: OutputDataRate
 }

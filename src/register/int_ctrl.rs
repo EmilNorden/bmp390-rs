@@ -3,14 +3,15 @@ use crate::register::{InvalidRegisterField, Readable, Reg, Writable};
 pub struct IntCtrl;
 impl Reg for IntCtrl { const ADDR: u8 = 0x19; }
 
+#[derive(Copy, Clone, Debug)]
 pub struct IntCtrlCfg {
-    int_od: bool,
-    int_level: bool,
-    int_latch: bool,
-    fwtm_en: bool,
-    ffull_en: bool,
-    int_ds: bool,
-    drdy_en: bool,
+    pub int_od: bool,
+    pub int_level: bool,
+    pub int_latch: bool,
+    pub fwtm_en: bool,
+    pub ffull_en: bool,
+    pub int_ds: bool,
+    pub drdy_en: bool,
 }
 
 impl Readable for IntCtrl {

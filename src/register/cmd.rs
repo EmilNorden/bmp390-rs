@@ -3,7 +3,7 @@ use crate::register::{Reg, Writable};
 pub struct Cmd;
 impl Reg for Cmd { const ADDR:u8 = 0x7E; }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum CmdData {
     FifoFlush,
     SoftReset

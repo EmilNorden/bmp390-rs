@@ -3,8 +3,9 @@ use crate::register::{InvalidRegisterField, Readable, Reg, Writable};
 pub struct PwrCtrl;
 impl Reg for PwrCtrl { const ADDR:u8 = 0x1B; }
 
+#[derive(Copy, Clone, Debug)]
 pub struct PwrCtrlCfg {
-    pub press_en: bool,
+    pub press_en: bool, 
     pub temp_en: bool,
     pub mode: PowerMode,
 }

@@ -14,21 +14,13 @@ use crate::register::{InvalidRegisterField, Readable, Reg};
 pub struct Data;
 impl Reg for Data { const ADDR: u8 = 0x04;}
 
+#[derive(Copy, Clone, Debug)]
 pub struct DataSample {
-    pressure: u32,
-    temperature: u32,
-}
+    /// The 24-bit uncalibrated pressure data from the DATA_0, DATA_1 and DATA_2 registers
+    pub pressure: u32,
 
-impl DataSample {
-    pub fn new(pressure: u32, temperature: u32) -> Self {
-        Self { pressure, temperature }
-    }
-
-    /// Returns the raw uncalibrated pressure data from the DATA_0, DATA_1 and DATA_2 registers
-    pub fn pressure(&self) -> u32 { self.pressure }
-
-    /// Returns the raw uncalibrated temperature data from the DATA_3, DATA_4 and DATA_5 registers
-    pub fn temperature(&self) -> u32 { self.temperature }
+    /// The 24-bit uncalibrated temperature data from the DATA_3, DATA_4 and DATA_5 registers
+    pub temperature: u32,
 }
 
 impl Readable for Data {

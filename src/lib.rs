@@ -187,9 +187,9 @@ where
         let measurement = self.bus.read::<data::Data>().await?;
 
         let compensated_temperature =
-            self.calibration_data.compensate_temperature(measurement.temperature());
+            self.calibration_data.compensate_temperature(measurement.temperature);
         let compensated_pressure =
-            self.calibration_data.compensate_pressure(measurement.pressure());
+            self.calibration_data.compensate_pressure(measurement.pressure);
 
         Ok(Measurement {
             pressure: compensated_pressure,

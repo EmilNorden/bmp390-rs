@@ -3,8 +3,9 @@ use crate::register::{InvalidRegisterField, Readable, Reg, Writable};
 pub struct Config;
 impl Reg for Config { const ADDR: u8 = 0x1F; }
 
+#[derive(Copy, Clone, Debug)]
 pub struct ConfigFields {
-    pub(crate) iir_filter: IIRFilterCoefficient
+    pub iir_filter: IIRFilterCoefficient
 }
 
 impl Readable for Config {
