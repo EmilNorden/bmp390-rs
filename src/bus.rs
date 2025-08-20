@@ -1,16 +1,21 @@
 use crate::Bmp390Error;
-use crate::register::Register;
+use crate::register::{Readable, Writable};
+
+const MAX_REG_BYTES:usize = 22;
 
 pub trait Bus {
     type Error;
-    fn write_register(&mut self, reg: Register, data: u8) ->  impl Future<Output = Result<(), Self::Error>>;
+    
+    fn read<R: Readable>(&mut self) -> impl Future<Output = Result<R::Out, Bmp390Error<Self::Error>>>;
 
-    fn read_register(&mut self, reg: Register, data: &mut [u8]) -> impl Future<Output = Result<(), Self::Error>>;
+    fn write<W: Writable>(&mut self, v: &W::In) -> impl Future<Output = Result<(), Bmp390Error<Self::Error>>>;
+    
 }
 
 pub struct I2c<I2cType> {
     i2c: I2cType,
-    address: u8
+    address: u8,
+    scratch: [u8; MAX_REG_BYTES],
 }
 
 impl<I2cType> I2c<I2cType>
@@ -18,7 +23,7 @@ where
     I2cType: embedded_hal_async::i2c::I2c
 {
     pub(crate) fn new(i2c: I2cType, address: u8) -> Self {
-        Self { i2c, address }
+        Self { i2c, address, scratch: [0; MAX_REG_BYTES] }
     }
 }
 
@@ -28,14 +33,20 @@ where
 {
     type Error = <I2cType as embedded_hal_async::i2c::ErrorType>::Error;
 
-    async fn write_register(&mut self, reg: Register, value: u8) -> Result<(), Self::Error> {
-        self.i2c.write(self.address,&[reg.addr(), value]).await?;
+    async fn read<R: Readable>(&mut self) -> Result<R::Out, Bmp390Error<Self::Error>> {
+        let buf = &mut self.scratch[..R::N];
+        self.i2c.write_read(self.address, &[R::ADDR], buf).await.map_err(Bmp390Error::Bus)?;
 
-        Ok(())
+        Ok(R::decode(&buf).map_err(Bmp390Error::UnexpectedRegisterData)?)
     }
 
-    async fn read_register(&mut self, reg: Register, data: &mut [u8]) -> Result<(), Self::Error> {
-        self.i2c.write_read(self.address,&[reg.addr()], data).await?;
+    async fn write<W: Writable>(&mut self, v: &W::In) -> Result<(), Bmp390Error<Self::Error>> {
+        debug_assert!(W::N + 1 <= self.scratch.len());
+        let buf = &mut self.scratch[..W::N + 1];
+        buf[0] = W::ADDR;
+        W::encode(&v, &mut buf[1..W::N+1]);
+
+        self.i2c.write(self.address, buf).await.map_err(Bmp390Error::Bus)?;
 
         Ok(())
     }
@@ -43,6 +54,7 @@ where
 
 pub struct Spi<SpiType> {
     spi: SpiType,
+    scratch: [u8; MAX_REG_BYTES],
 }
 
 impl<SpiType> Spi<SpiType>
@@ -50,7 +62,7 @@ where
     SpiType: embedded_hal_async::spi::SpiDevice
 {
     pub(crate) fn new(spi: SpiType) -> Self {
-        Self { spi }
+        Self { spi, scratch: [0; MAX_REG_BYTES] }
     }
 
 }
@@ -60,18 +72,42 @@ where
     SpiType: embedded_hal_async::spi::SpiDevice,
 {
     type Error = <SpiType as embedded_hal_async::spi::ErrorType>::Error;
-
-    async fn write_register(&mut self, reg: Register, value: u8) -> Result<(), Self::Error> {
-        self.spi.write(&[reg.addr(), value]).await?;
+/*
+    async fn write_register(&mut self, reg: Register, value: u8) -> Result<(), Bmp390Error<Self::Error>> {
+        self.spi.write(&[reg.addr(), value]).await.map_err(Bmp390Error::Bus)?;
 
         Ok(())
     }
 
-    async fn read_register(&mut self, reg: Register, data: &mut [u8]) -> Result<(), Self::Error>{
+    async fn read_register(&mut self, reg: Register, data: &mut [u8]) -> Result<(), Bmp390Error<Self::Error>>{
         use embedded_hal_async::spi::Operation;
         self.spi.transaction(
             &mut [Operation::Write(&[reg.addr()]), Operation::Read(data)],
-        ).await?;
+        ).await.map_err(Bmp390Error::Bus)?;
+
+        Ok(())
+    }
+    */
+ 
+
+    async fn read<R: Readable>(&mut self) -> Result<R::Out, Bmp390Error<Self::Error>> {
+        use embedded_hal_async::spi::Operation;
+        let buf = &mut self.scratch[..R::N];
+        self.spi.transaction(
+            &mut [Operation::Write(&[R::ADDR]), Operation::Read(buf)],
+        ).await.map_err(Bmp390Error::Bus)?;
+
+        Ok(R::decode(&buf).map_err(Bmp390Error::UnexpectedRegisterData)?)
+    }
+
+    async fn write<W: Writable>(&mut self, v: &W::In) -> Result<(), Bmp390Error<Self::Error>> {
+        debug_assert!(W::N + 1 <= self.scratch.len());
+
+        let buf = &mut self.scratch[..W::N + 1];
+        buf[0] = W::ADDR;
+        W::encode(&v, &mut buf[1..W::N+1]);
+
+        self.spi.write(buf).await.map_err(Bmp390Error::Bus)?;
 
         Ok(())
     }

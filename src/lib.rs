@@ -5,20 +5,23 @@ pub mod register;
 pub mod bus;
 mod calibration;
 
+pub mod testing;
+
 use core::fmt::{Debug};
 use embedded_hal_async::delay::DelayNs;
 use embedded_hal_async::i2c::SevenBitAddress;
 use crate::bus::{Bus, I2c, Spi};
 use crate::calibration::CalibrationData;
 use crate::config::Configuration;
-use crate::register::{PowerMode, Register};
+use crate::register::{chip_id, data, err_reg, odr, osr, pwr_ctrl, status, InvalidRegisterField, Readable, Writable};
 
 const BMP390_CHIP_ID:u8 = 0x60;
 
 #[derive(Debug)]
 pub enum Bmp390Error<BusError> {
     Bus(BusError),
-    NotConnected
+    NotConnected,
+    UnexpectedRegisterData(InvalidRegisterField),
 }
 
 type Bmp390Result<T, BusError> = Result<T, Bmp390Error<BusError>>;
@@ -64,9 +67,8 @@ where
 {
     async fn probe_ready<D: DelayNs>(bus: &mut B, delay: &mut D, attempts: u32) -> Bmp390Result<(), B::Error> {
         for _ in 0..attempts {
-            let mut buf = [0u8; 1];
-            if let Ok(id) = bus.read_register(Register::ChipId, &mut buf).await {
-                if buf[0] == BMP390_CHIP_ID {
+            if let Ok(id) = bus.read::<register::chip_id::ChipId>().await {
+                if id == BMP390_CHIP_ID {
                     return Ok(())
                 }
             }
@@ -82,99 +84,123 @@ where
 
         let calibration_data = CalibrationData::new(&mut bus).await?;
 
-        bus.write_register(
-            Register::PwrCtrl,
-            (config.enable_pressure as u8) |
-                (config.enable_temperature as u8) << 1 |
-                config.mode.register_value() << 4
-        ).await.map_err(Bmp390Error::Bus)?;
+        bus.write::<pwr_ctrl::PwrCtrl>(&pwr_ctrl::PwrCtrlCfg {
+            press_en: config.enable_pressure,
+            temp_en: config.enable_temperature,
+            mode: config.mode,
+        }).await?;
 
-        bus.write_register(
-            Register::Osr,
-            config.pressure_oversampling.register_value() |
-                config.temperature_oversampling.register_value() << 3
-        ).await.map_err(Bmp390Error::Bus)?;
+        bus.write::<osr::Osr>(&osr::OsrCfg {
+            osr_p: config.pressure_oversampling,
+            osr_t: config.temperature_oversampling,
+        }).await?;
 
-        bus.write_register(
-            Register::Odr,
-            config.output_data_rate.register_value()
-        ).await.map_err(Bmp390Error::Bus)?;
+        bus.write::<odr::Odr>(&odr::OdrCfg {
+            odr_sel: config.output_data_rate
+        }).await?;
 
-        bus.write_register(
-            Register::Config,
-            config.iir_filter_coefficient.register_value()
-        ).await.map_err(Bmp390Error::Bus)?;
+        bus.write::<register::config::Config>(&register::config::ConfigFields {
+            iir_filter: config.iir_filter_coefficient
+        }).await?;
 
         Ok(Bmp390 { bus, calibration_data })
     }
 
-    pub async fn is_connected(&mut self) -> Bmp390Result<bool, B::Error> {
-        let mut buf = [0u8; 1];
-        self.bus.read_register(Register::ChipId, &mut buf)
-            .await
-            .map_err(Bmp390Error::Bus)?;
-
-        Ok(buf[0] == BMP390_CHIP_ID)
+    pub async fn read<R: Readable>(&mut self) -> Result<R::Out, Bmp390Error<B::Error>> {
+        Ok(self.bus.read::<R>().await?)
+    }
+    
+    pub async fn write<W: Writable>(&mut self, v: &W::In) ->  Result<(), Bmp390Error<B::Error>> {
+        Ok(self.bus.write::<W>(v).await?)
     }
 
-    /// Sets the power mode of the device. 
-    /// 
+    pub async fn is_connected(&mut self) -> Bmp390Result<bool, B::Error> {
+        let id = self.bus.read::<chip_id::ChipId>().await?;
+
+        Ok(id == BMP390_CHIP_ID)
+    }
+
+    /// Returns the error flags from the ERR_REG (0x02) register.
+    ///
+    /// These flags are
+    pub async fn error_flags(&mut self) -> Bmp390Result<err_reg::ErrorFlags, B::Error> {
+        Ok(self.bus.read::<err_reg::ErrReg>().await?)
+    }
+
+    /// Returns the status from the STATUS (0x03) register.
+    pub async fn status(&mut self) -> Bmp390Result<status::StatusFlags, B::Error> {
+        Ok(self.bus.read::<status::Status>().await?)
+    }
+
+    /// Sets the power mode of the device by writing to the PwrCtrl (0x1B) register
+    ///
     /// As described in section 3.3.4 of the datasheet, these are the valid state transitions:
-    /// 
+    ///
     /// Sleep => Normal
-    /// 
+    ///
     /// Normal => Sleep
-    /// 
+    ///
     /// Sleep => Forced => Sleep (Forced is a transient state and the device will return to Sleep when the measurement is finished)
-    /// 
+    ///
     /// The device ignores any attempt to perform an invalid state transition.
-    pub async fn set_mode(&mut self, mode: PowerMode) -> Bmp390Result<(), B::Error> {
-        let mut buf = [0u8; 1];
-        self.bus.read_register(Register::PwrCtrl, &mut buf)
-            .await
-            .map_err(Bmp390Error::Bus)?;
-
-        let value = (buf[0] & 0b11) | (mode.register_value() << 4);
-        self.bus.write_register(Register::PwrCtrl, value)
-            .await
-            .map_err(Bmp390Error::Bus)?;
-
+    ///
+    /// # Examples
+    ///
+    /// ```rust, no_run
+    /// # tokio_test::block_on(async {
+    /// use bmp390_rs::register::pwr_ctrl::PowerMode;
+    /// # let mut device = bmp390_rs::testing::dummy_device().await;
+    /// device.set_mode(PowerMode::Normal).await;
+    /// # });
+    pub async fn set_mode(&mut self, mode: pwr_ctrl::PowerMode) -> Bmp390Result<(), B::Error> {
+        let mut pwr_ctrl = self.bus.read::<pwr_ctrl::PwrCtrl>().await?;
+        pwr_ctrl.mode = mode;
+        self.bus.write::<pwr_ctrl::PwrCtrl>(&pwr_ctrl).await?;
         Ok(())
     }
-
-    /// Returns the current power mode.
-    /// 
-    pub async fn mode(&mut self) -> Bmp390Result<PowerMode, B::Error> {
-        let mut buf = [0u8; 1];
-        self.bus.read_register(Register::PwrCtrl, &mut buf)
-            .await
-            .map_err(Bmp390Error::Bus)?;
-
-        // OK to use .unwrap() here as PowerMode::try_from's error type is Infallible
-        Ok(PowerMode::try_from(buf[0]).unwrap())
+    /// Reads the current power mode from the PwrCtrl (0x1B) register
+    ///
+    /// # Examples
+    ///
+    /// ```rust, no_run
+    /// # tokio_test::block_on(async {
+    /// # let mut device = bmp390_rs::testing::dummy_device().await;
+    /// device.mode().await;
+    /// # });
+    pub async fn mode(&mut self) -> Bmp390Result<pwr_ctrl::PowerMode, B::Error> {
+        Ok(self.bus.read::<pwr_ctrl::PwrCtrl>().await?.mode)
     }
 
+    /// Reads the **calibrated** pressure and temperature from the data (0x04 - 0x09) registers.
+    /// This method will read data from these registers and calibrate them using the NVM-stored calibration coefficients
+    /// before returning them to the caller.
+    ///
+    /// # Examples
+    ///
+    /// ```rust, no_run
+    /// # tokio_test::block_on(async {
+    /// # let mut device = bmp390_rs::testing::dummy_device().await;
+    /// let data = device.read_sensor_data().await.unwrap();
+    /// println!("The current pressure and temperature is {} and {}", data.pressure, data.temperature);
+    /// # });
     pub async fn read_sensor_data(&mut self) -> Bmp390Result<Measurement, B::Error> {
-        let mut buffer = [0u8; 6];
-        self.bus.read_register(Register::Data0, &mut buffer)
-            .await
-            .map_err(Bmp390Error::Bus)?;
-
-        let uncompensated_pressure = u32::from_le_bytes([buffer[0], buffer[1], buffer[2], 0]);
-        let uncompensated_temperature = u32::from_le_bytes([buffer[3], buffer[4], buffer[5], 0]);
+        let measurement = self.bus.read::<data::Data>().await?;
 
         let compensated_temperature =
-            self.calibration_data.compensate_temperature(uncompensated_temperature);
+            self.calibration_data.compensate_temperature(measurement.temperature());
         let compensated_pressure =
-            self.calibration_data.compensate_pressure(uncompensated_pressure);
+            self.calibration_data.compensate_pressure(measurement.pressure());
 
         Ok(Measurement {
             pressure: compensated_pressure,
             temperature: compensated_temperature,
         })
     }
+
+
 }
 
+/// Holds calibrated pressure and temperature samples.
 pub struct Measurement {
     pub pressure: f32,
     pub temperature: f32,

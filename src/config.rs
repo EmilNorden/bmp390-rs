@@ -1,4 +1,7 @@
-use crate::register::{IIRFilterCoefficient, OutputDataRate, Oversampling, PowerMode};
+use crate::register::config::IIRFilterCoefficient;
+use crate::register::odr::OutputDataRate;
+use crate::register::osr::Oversampling;
+use crate::register::pwr_ctrl::PowerMode;
 
 pub struct Configuration {
     pub(crate) enable_pressure: bool,
