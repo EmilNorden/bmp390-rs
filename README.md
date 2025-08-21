@@ -1,4 +1,7 @@
 # Rust BMP390 driver
+
+**This driver is still under development and is far from feature-complete. SPI mode is not yet working, and FIFO functionality is not implemented.**
+
 This crate provides a platform-agnostic async driver for the Bosch BMP390 pressure (and temperature!) sensor using the [`embedded-hal-async`](https://github.com/rust-embedded/embedded-hal) traits.
 
 The BMP390 driver supports both I2C and SPI communication, and this driver does as well.
