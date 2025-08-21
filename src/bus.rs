@@ -54,7 +54,7 @@ where
 
 pub struct Spi<SpiType> {
     spi: SpiType,
-    scratch: [u8; MAX_REG_BYTES],
+    scratch: [u8; MAX_REG_BYTES + 1], // BMP390 send 1 initial dummy byte in responses, so account for that.
 }
 
 impl<SpiType> Spi<SpiType>
@@ -62,7 +62,7 @@ where
     SpiType: embedded_hal_async::spi::SpiDevice
 {
     pub(crate) fn new(spi: SpiType) -> Self {
-        Self { spi, scratch: [0; MAX_REG_BYTES] }
+        Self { spi, scratch: [0; MAX_REG_BYTES + 1] }
     }
 
 }
@@ -72,39 +72,23 @@ where
     SpiType: embedded_hal_async::spi::SpiDevice,
 {
     type Error = <SpiType as embedded_hal_async::spi::ErrorType>::Error;
-/*
-    async fn write_register(&mut self, reg: Register, value: u8) -> Result<(), Bmp390Error<Self::Error>> {
-        self.spi.write(&[reg.addr(), value]).await.map_err(Bmp390Error::Bus)?;
-
-        Ok(())
-    }
-
-    async fn read_register(&mut self, reg: Register, data: &mut [u8]) -> Result<(), Bmp390Error<Self::Error>>{
-        use embedded_hal_async::spi::Operation;
-        self.spi.transaction(
-            &mut [Operation::Write(&[reg.addr()]), Operation::Read(data)],
-        ).await.map_err(Bmp390Error::Bus)?;
-
-        Ok(())
-    }
-    */
- 
-
+    
     async fn read<R: Readable>(&mut self) -> Result<R::Out, Bmp390Error<Self::Error>> {
         use embedded_hal_async::spi::Operation;
-        let buf = &mut self.scratch[..R::N];
+        let buf = &mut self.scratch[..R::N + 1]; // +1 to account for dummy byte sent by BMP390 in SPI mode
+        // BMP390 uses the MSB bit of the register address to denote reads and writes. 1=Read, 0=Write.
         self.spi.transaction(
-            &mut [Operation::Write(&[R::ADDR]), Operation::Read(buf)],
+            &mut [Operation::Write(&[R::ADDR | 0x80]), Operation::Read(buf)],
         ).await.map_err(Bmp390Error::Bus)?;
 
-        Ok(R::decode(&buf).map_err(Bmp390Error::UnexpectedRegisterData)?)
+        Ok(R::decode(&buf[1..]).map_err(Bmp390Error::UnexpectedRegisterData)?)
     }
 
     async fn write<W: Writable>(&mut self, v: &W::In) -> Result<(), Bmp390Error<Self::Error>> {
         debug_assert!(W::N + 1 <= self.scratch.len());
 
         let buf = &mut self.scratch[..W::N + 1];
-        buf[0] = W::ADDR;
+        buf[0] = W::ADDR & 0x7F; // MSB should be 0 for writes.
         W::encode(&v, &mut buf[1..W::N+1]);
 
         self.spi.write(buf).await.map_err(Bmp390Error::Bus)?;
