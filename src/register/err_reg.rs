@@ -13,18 +13,18 @@ impl Reg for ErrReg {  const ADDR:u8 = 0x02; }
 #[derive(Copy, Clone, Debug)]
 pub struct ErrorFlags {
     /// A fatal error occurred.
-    fatal_err: bool,
+    pub fatal_err: bool,
 
     /// Command execution failed.
     ///
     /// This value is cleared on **register** read.
-    cmd_err: bool,
+    pub cmd_err: bool,
 
     /// Sensor configuration error detected.
     ///
     /// This can only happen in [`Normal´] power mode.
     /// This value is cleared on **register** read.
-    conf_err: bool,
+    pub conf_err: bool,
 }
 
 impl Readable for ErrReg {

@@ -15,13 +15,13 @@ pub struct EventFlags {
     /// Returns [`true`] after device power-up or after a soft-reset.
     ///
     /// This value is cleared on **register** read.
-    por_detected: bool,
+    pub por_detected: bool,
 
     /// Returns [`true`] if a serial interface transaction has occurred
     /// during a pressure or temperature conversion.
     ///
     /// This value is cleared on **register** read.
-    itf_act_pt: bool,
+    pub itf_act_pt: bool,
 }
 
 impl Readable for Event {
