@@ -5,17 +5,17 @@ impl Reg for IntStatus { const ADDR: u8 = 0x11; }
 
 #[derive(Copy, Clone, Debug)]
 pub struct IntStatusFlags {
-    /// Has a FIFO watermark interrupt triggered?
+    /// Has a FIFO watermark interrupt been asserted?
     ///
     /// This value is cleared on **register** read.
     pub fwm_int: bool,
 
-    /// Has a FIFO full interrupt triggered?
+    /// Has a FIFO full interrupt been asserted?
     ///
     /// This value is cleared on **register** read.
     pub ffull_int: bool,
 
-    /// Has a data ready interrupt triggered?
+    /// Has a data ready interrupt asserted?
     ///
     /// This value is cleared on **register** read.
     pub drdy: bool,
