@@ -11,7 +11,7 @@ pub mod testing;
 use crate::bus::{Bus, I2c, Spi};
 use crate::calibration::CalibrationData;
 use crate::config::Configuration;
-use crate::fifo::{ControlFrameType, FifoFrame, FifoHeader, SensorFrameType};
+use crate::fifo::{ControlFrameType, FifoConfiguration, FifoFrame, FifoFullBehavior, FifoHeader, SensorFrameType};
 use crate::register::fifo_data::FifoData;
 use crate::register::{
     InvalidRegisterField, Readable, Writable, chip_id, data, err_reg, odr, osr,
@@ -20,6 +20,8 @@ use crate::register::{
 use core::fmt::Debug;
 use embedded_hal_async::delay::DelayNs;
 use embedded_hal_async::i2c::SevenBitAddress;
+use crate::register::fifo_config::{FifoConfig1, FifoConfig1Fields, FifoConfig2, FifoConfig2Fields, FifoDataSource};
+use crate::register::fifo_length::FifoLength;
 
 const BMP390_CHIP_ID: u8 = 0x60;
 
@@ -156,6 +158,91 @@ where
         Ok(self.bus.read::<status::Status>().await?)
     }
 
+    /// Returns the current FIFO configuration. This is a combination of the fields stored in registers FIFO_CONFIG_1 (0x17) and FIFO_CONFIG_2 (0x18).
+    ///
+    /// You could theoretically access the same information using [`Bmp390::read::<FifoConfig1>`] and [`Bmp390::read::<FifoConfig2>`].
+    pub async fn fifo_configuration(&mut self) -> Bmp390Result<FifoConfiguration, B::Error> {
+        let config1 = self.read::<FifoConfig1>().await?;
+        let config2 = self.read::<FifoConfig2>().await?;
+
+        Ok(FifoConfiguration::new(
+            config1.fifo_mode,
+            config1.fifo_press_en,
+            config1.fifo_temp_en,
+            config1.fifo_time_en,
+            if config1.fifo_stop_on_full { FifoFullBehavior::Stop } else { FifoFullBehavior::OverwriteOldest },
+            config2.fifo_subsampling,
+            config2.data_select == FifoDataSource::Filtered
+        ))
+    }
+
+    /// Writes a new FIFO configuration to the device.
+    ///
+    /// This equates to updating registers FIFO_CONFIG_1 (0x17) and FIFO_CONFIG_2 (0x18)
+    pub async fn set_fifo_configuration(&mut self, cfg: FifoConfiguration) -> Bmp390Result<(), B::Error> {
+        self.bus.write::<FifoConfig1>(&FifoConfig1Fields {
+            fifo_mode: cfg.enable_fifo(),
+            fifo_stop_on_full: cfg.fifo_full_behavior() == FifoFullBehavior::Stop,
+            fifo_time_en: cfg.enable_time(),
+            fifo_press_en: cfg.enable_pressure(),
+            fifo_temp_en: cfg.enable_temperature(),
+        }).await?;
+
+        self.bus.write::<FifoConfig2>(&FifoConfig2Fields {
+            fifo_subsampling: cfg.subsampling() & 0b0000_0111,
+            data_select: if cfg.apply_iir_filter() { FifoDataSource::Filtered } else { FifoDataSource::Unfiltered },
+        }).await?;
+
+        Ok(())
+    }
+
+    /// Returns the number of bytes in the FIFO buffer.
+    ///
+    /// Note that this does not return the number of data frames in the buffer.
+    /// The number of frames in the FIFO depends on the size of each frame, which can vary depending on your configuration.
+    pub async fn fifo_length(&mut self) -> Bmp390Result<u16, B::Error> {
+        Ok(self.bus.read::<FifoLength>().await?)
+    }
+
+    /// Pops a frame from the top of the FIFO.
+    ///
+    /// Note that the FIFO needs to be enabled in order for frames to be written to it, but it is still possible to read out frames even when the FIFO is disabled.
+    /// Enabling the FIFO is done via [`Bmp390::set_fifo_configuration`].
+    /// [`Bmp390::fifo_length`] can be used to determine the current size (in bytes, not frames) of the FIFO buffer.
+    /// If there are no frames ([`Bmp390::fifo_length`] == 0) ([`FifoFrame::SensorFrame`] with a value of [`SensorFrameType::Empty`] is returned.
+    ///
+    /// # Examples
+    ///
+    /// ```rust, no_run
+    /// # tokio_test::block_on(async {
+    /// use bmp390_rs::fifo::{FifoFrame, ControlFrameType, SensorFrameType};
+    /// # let mut device = bmp390_rs::testing::dummy_device().await;
+    /// let frame = device.read_fifo_frame().await.unwrap();
+    /// match frame {
+    ///     FifoFrame::SensorFrame(frame) => {
+    ///         match frame {
+    ///             SensorFrameType::SensorTime(t) =>
+    ///                 { println!("Read sensor time {}", t);}
+    ///             SensorFrameType::Pressure(p) =>
+    ///                 { println!("Read pressure {}", p);}
+    ///             SensorFrameType::Temperature(t) =>
+    ///                 { println!("Read temperature {}", t); }
+    ///             SensorFrameType::PressureAndTemperature{ pressure, temperature } =>
+    ///                 { println!("Read pressure {} AND temperature {}", pressure, temperature) }
+    ///             SensorFrameType::Empty =>
+    ///                 { println!("Read an empty frame"); }
+    ///         }
+    ///     }
+    ///     FifoFrame::ControlFrame(ctrl_frame) => {
+    ///         match ctrl_frame {
+    ///             ControlFrameType::ConfigError =>
+    ///                 { println!("Read control frame: Config error"); }
+    ///             ControlFrameType::ConfigChange =>
+    ///                 { println!("Read control frame: Config change"); }
+    ///         }
+    ///     }
+    /// }
+    /// # });
     pub async fn read_fifo_frame(&mut self) -> Bmp390Result<FifoFrame, B::Error> {
         const SENSOR_SMALL_FRAME_SIZE: usize = 4;
         const SENSOR_LARGE_FRAME_SIZE: usize = 7;
