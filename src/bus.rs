@@ -1,7 +1,7 @@
 use crate::Bmp390Error;
 use crate::register::{Readable, Writable};
 
-const MAX_REG_BYTES:usize = 22;
+pub(crate) const MAX_REG_BYTES:usize = 22;
 
 pub trait Bus {
     type Error;
@@ -72,7 +72,7 @@ where
     SpiType: embedded_hal_async::spi::SpiDevice,
 {
     type Error = <SpiType as embedded_hal_async::spi::ErrorType>::Error;
-    
+
     async fn read<R: Readable>(&mut self) -> Result<R::Out, Bmp390Error<Self::Error>> {
         use embedded_hal_async::spi::Operation;
         let buf = &mut self.scratch[..R::N + 1]; // +1 to account for dummy byte sent by BMP390 in SPI mode
@@ -80,6 +80,7 @@ where
         self.spi.transaction(
             &mut [Operation::Write(&[R::ADDR | 0x80]), Operation::Read(buf)],
         ).await.map_err(Bmp390Error::Bus)?;
+
 
         Ok(R::decode(&buf[1..]).map_err(Bmp390Error::UnexpectedRegisterData)?)
     }
