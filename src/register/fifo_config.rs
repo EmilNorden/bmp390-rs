@@ -45,8 +45,8 @@ impl Reg for FifoConfig2 { const ADDR: u8 = 0x18; }
 
 #[derive(Copy, Clone, Debug)]
 pub struct FifoConfig2Fields {
-    fifo_subsampling: u8,
-    data_select: FifoDataSource,
+    pub fifo_subsampling: u8,
+    pub data_select: FifoDataSource,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]

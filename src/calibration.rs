@@ -74,15 +74,15 @@ impl CalibrationData {
 
 #[cfg(test)]
 mod tests {
-    use crate::register::{calibration, Reg};
+    use crate::register::calibration::Calibration;
     use crate::testing::FakeBus;
     use super::*;
 
 
     #[tokio::test]
     async fn test_load_calibration() {
-        let mut bus: FakeBus<'_, 10> = FakeBus::new();
-        bus.mock_register(calibration::Calibration::ADDR,
+        let mut bus: FakeBus<10> = FakeBus::new();
+        bus.with_response::<Calibration>(
                           &[0x12, 0x34, 0x56, 0x78, 0x1, 0xA, 0x1, 0xAB, 0xCD, 0x42, 0xFF, 0xEF, 0xBE, 0xAD, 0xB, 0x2, 0xE7, 0xFE, 0xFE, 0x80, 0x40]);
 
         let cb = CalibrationData::new(&mut bus).await.unwrap();
