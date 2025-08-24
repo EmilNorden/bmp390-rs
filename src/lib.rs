@@ -7,6 +7,7 @@ pub mod register;
 
 pub mod fifo;
 pub mod testing;
+pub mod typestate;
 
 use crate::bus::{Bus, I2c, Spi};
 use crate::calibration::CalibrationData;
@@ -29,6 +30,7 @@ use crate::register::{
 use core::fmt::Debug;
 use embedded_hal_async::delay::DelayNs;
 use embedded_hal_async::i2c::SevenBitAddress;
+use crate::register::osr::Oversampling;
 
 const BMP390_CHIP_ID: u8 = 0x60;
 
@@ -169,6 +171,8 @@ where
             odr_sel: config.output_data_rate,
         })
         .await?;
+
+        //config.temperature_oversampling
 
         bus.write::<register::config::Config>(&register::config::ConfigFields {
             iir_filter: config.iir_filter_coefficient,
