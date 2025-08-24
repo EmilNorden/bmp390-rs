@@ -23,7 +23,8 @@ use crate::register::fifo_length::FifoLength;
 use crate::register::int_ctrl::IntCtrl;
 use crate::register::int_status::{IntStatus, IntStatusFlags};
 use crate::register::{
-    InvalidRegisterField, Readable, Writable, chip_id, data, err_reg, odr, osr, pwr_ctrl, status,
+    InvalidRegisterField, Readable, Writable, chip_id, cmd, data, err_reg, odr, osr, pwr_ctrl,
+    status,
 };
 use core::fmt::Debug;
 use embedded_hal_async::delay::DelayNs;
@@ -192,6 +193,17 @@ where
         let id = self.bus.read::<chip_id::ChipId>().await?;
 
         Ok(id == BMP390_CHIP_ID)
+    }
+
+    /// Triggers a soft reset
+    ///
+    /// All user settings are reset to their default state.
+    ///
+    /// **Note:** This resets the chip to factory defaults, not to the configuration that was provided when constructing the driver.
+    pub async fn soft_reset<D: DelayNs>(&mut self, delay: &mut D) -> Bmp390Result<(), B::Error> {
+        self.write::<cmd::Cmd>(&cmd::CmdData::SoftReset).await?;
+        Self::probe_ready(&mut self.bus, delay, 5).await?;
+        Ok(())
     }
 
     /// Returns the error flags from the ERR_REG (0x02) register.
