@@ -1,13 +1,17 @@
-mod normal;
-mod sample;
+mod fifo;
 mod forced;
+mod measurement;
+mod normal;
+
+pub use fifo::FifoOutput;
 
 use crate::bus::{Bus, I2c, Spi};
 use crate::config::Configuration;
+use crate::register::int_status::IntStatus;
 use crate::register::pwr_ctrl::PowerMode;
+use crate::typestate::measurement::Measurement;
 use crate::{Bmp390, Bmp390Error, SdoPinState};
 use core::marker::PhantomData;
-use core::pin::Pin;
 use embedded_hal::digital::{Error, ErrorKind, ErrorType, InputPin};
 use embedded_hal_async::delay::DelayNs;
 use embedded_hal_async::digital::Wait;
@@ -15,6 +19,7 @@ use embedded_hal_async::digital::Wait;
 /// Marker for the "No bus chosen yet" state in Bmp390Builder
 pub struct NoBus;
 
+/// Marker for the "No interrupt pin configured yet" state in the Bmp390Builder
 pub struct NoPin;
 
 #[derive(Debug)]
@@ -26,10 +31,11 @@ impl Error for NoPinError {
     }
 }
 
-impl ErrorType for NoPin { type Error = NoPinError; }
+impl ErrorType for NoPin {
+    type Error = NoPinError;
+}
 
 impl Wait for NoPin {
-
     async fn wait_for_high(&mut self) -> Result<(), Self::Error> {
         Ok(())
     }
@@ -51,12 +57,31 @@ impl Wait for NoPin {
     }
 }
 
-pub struct Bmp390Builder<Out = NoOutput, B = NoBus, P = NoPin> {
+impl InputPin for NoPin {
+    fn is_high(&mut self) -> Result<bool, Self::Error> {
+        Ok(false)
+    }
+
+    fn is_low(&mut self) -> Result<bool, Self::Error> {
+        Ok(false)
+    }
+}
+
+#[derive(Debug)]
+pub enum TypeStateError<BusError, PinError> {
+    Device(Bmp390Error<BusError>),
+    Pin(PinError),
+    FifoConfigError,
+}
+
+pub type TypeStateResult<T, BusError, PinError> = Result<T, TypeStateError<BusError, PinError>>;
+
+pub struct Bmp390Builder<Out = NoOutput, B = NoBus, IntPin = NoPin> {
     bus: Option<B>,
     config: Configuration,
-    irq_pin: Option<P>,
+    int_pin: Option<IntPin>,
     _phantom_data: PhantomData<Out>,
-    _phantom_data_p: PhantomData<P>
+    _phantom_data_p: PhantomData<IntPin>,
 }
 
 impl Bmp390Builder<NoOutput, NoBus> {
@@ -66,9 +91,9 @@ impl Bmp390Builder<NoOutput, NoBus> {
             config: Configuration::default()
                 .enable_pressure_measurement(false)
                 .enable_temperature_measurement(false),
-            irq_pin: None,
+            int_pin: None,
             _phantom_data: PhantomData,
-            _phantom_data_p: PhantomData
+            _phantom_data_p: PhantomData,
         }
     }
 }
@@ -85,7 +110,7 @@ impl<Out> Bmp390Builder<Out, NoBus> {
         Bmp390Builder {
             bus: Some(I2c::new(i2c, sdo_pin_state.into())),
             config: self.config,
-            irq_pin: self.irq_pin,
+            int_pin: self.int_pin,
             _phantom_data: self._phantom_data,
             _phantom_data_p: self._phantom_data_p,
         }
@@ -98,7 +123,7 @@ impl<Out> Bmp390Builder<Out, NoBus> {
         Bmp390Builder {
             bus: Some(Spi::new(spi)),
             config: self.config,
-            irq_pin: self.irq_pin,
+            int_pin: self.int_pin,
             _phantom_data: self._phantom_data,
             _phantom_data_p: self._phantom_data_p,
         }
@@ -106,52 +131,61 @@ impl<Out> Bmp390Builder<Out, NoBus> {
 }
 
 impl<Out, B: Bus> Bmp390Builder<Out, B, NoPin> {
-    pub fn use_irq<Pin: Wait + InputPin>(self, pin: Pin) -> Bmp390Builder<Out, B, Pin> {
+    pub fn use_irq<IntPin: Wait + InputPin>(self, pin: IntPin) -> Bmp390Builder<Out, B, IntPin> {
         Bmp390Builder {
             bus: self.bus,
             config: self.config,
-            irq_pin: Some(pin),
+            int_pin: Some(pin),
             _phantom_data: self._phantom_data,
-            _phantom_data_p: PhantomData
+            _phantom_data_p: PhantomData,
         }
     }
 }
 
-impl<Out, B: Bus, P: Wait + InputPin> Bmp390Builder<Out, B, P> {
-    pub async fn into_normal<D: DelayNs>(
+impl<Out, B: Bus, IntPin: Wait + InputPin> Bmp390Builder<Out, B, IntPin> {
+
+    pub async fn into_fifo<D: DelayNs>(
         self,
-        delay: &mut D,
-    ) -> Result<normal::NormalDevice<Out, B>, BuilderError<B::Error>> {
+        mut delay: D,
+    ) -> Result<fifo::FifoDevice<Out, B, IntPin, D>, BuilderError<B::Error>> {
         let bus = self.bus.ok_or(BuilderError::NoBus)?;
         let config = Configuration::default().power_mode(PowerMode::Normal);
-        let device = Bmp390::new(bus, config, delay)
+        let device = Bmp390::new(bus, config, &mut delay)
             .await
             .map_err(|e| BuilderError::DeviceError(e))?;
 
-        Ok(normal::NormalDevice {
-            device,
-            _phantom_data: self._phantom_data,
-        })
+        Ok(fifo::FifoDevice::new(device, self.int_pin, delay))
+    }
+
+    pub async fn into_normal<D: DelayNs>(
+        self,
+        mut delay: D,
+    ) -> Result<normal::NormalDevice<Out, B, IntPin, D>, BuilderError<B::Error>> {
+        let bus = self.bus.ok_or(BuilderError::NoBus)?;
+        let config = Configuration::default().power_mode(PowerMode::Normal);
+        let device = Bmp390::new(bus, config, &mut delay)
+            .await
+            .map_err(|e| BuilderError::DeviceError(e))?;
+
+        Ok(normal::NormalDevice::new(device, self.int_pin, delay)
+            .await
+            .map_err(BuilderError::DeviceError)?)
     }
 
     pub async fn into_forced<D: DelayNs>(
         self,
-        delay: &mut D,
-    ) -> Result<forced::ForcedDevice<Out, B, P>, BuilderError<B::Error>> {
+        mut delay: D,
+    ) -> Result<forced::ForcedDevice<Out, B, IntPin, D>, BuilderError<B::Error>> {
         let bus = self.bus.ok_or(BuilderError::NoBus)?;
         let config = Configuration::default().power_mode(PowerMode::Sleep);
-        let device = Bmp390::new(bus, config, delay)
+        let device = Bmp390::new(bus, config, &mut delay)
             .await
             .map_err(BuilderError::DeviceError)?;
 
-        Ok(forced::ForcedDevice::new(device, self.irq_pin).await.map_err(BuilderError::DeviceError)?)
-        /*Ok(forced::ForcedDevice {
-            device,
-            irq_pin: self.irq_pin,
-            _phantom_data: self._phantom_data
-        })*/
+        Ok(forced::ForcedDevice::new(device, self.int_pin, delay)
+            .await
+            .map_err(BuilderError::DeviceError)?)
     }
-
 }
 
 impl<B: Bus> Bmp390Builder<NoOutput, B> {
@@ -159,9 +193,9 @@ impl<B: Bus> Bmp390Builder<NoOutput, B> {
         Bmp390Builder {
             bus: self.bus,
             config: self.config.enable_pressure_measurement(true),
-            irq_pin: self.irq_pin,
+            int_pin: self.int_pin,
             _phantom_data: PhantomData,
-            _phantom_data_p: self._phantom_data_p
+            _phantom_data_p: self._phantom_data_p,
         }
     }
 
@@ -169,9 +203,9 @@ impl<B: Bus> Bmp390Builder<NoOutput, B> {
         Bmp390Builder {
             bus: self.bus,
             config: self.config.enable_temperature_measurement(true),
-            irq_pin: self.irq_pin,
+            int_pin: self.int_pin,
             _phantom_data: PhantomData,
-            _phantom_data_p: self._phantom_data_p
+            _phantom_data_p: self._phantom_data_p,
         }
     }
 }
@@ -181,9 +215,9 @@ impl<B: Bus> Bmp390Builder<Pressure, B> {
         Bmp390Builder {
             bus: self.bus,
             config: self.config.enable_temperature_measurement(true),
-            irq_pin: self.irq_pin,
+            int_pin: self.int_pin,
             _phantom_data: PhantomData,
-            _phantom_data_p: self._phantom_data_p
+            _phantom_data_p: self._phantom_data_p,
         }
     }
 }
@@ -193,9 +227,9 @@ impl<B: Bus> Bmp390Builder<Temperature, B> {
         Bmp390Builder {
             bus: self.bus,
             config: self.config.enable_pressure_measurement(true),
-            irq_pin: self.irq_pin,
+            int_pin: self.int_pin,
             _phantom_data: PhantomData,
-            _phantom_data_p: self._phantom_data_p
+            _phantom_data_p: self._phantom_data_p,
         }
     }
 }
@@ -219,3 +253,43 @@ pub struct NoOutput;
 pub struct Temperature;
 pub struct Pressure;
 pub struct PressureAndTemperature;
+
+/// Waits for data to be ready in the Data registers.
+///
+/// This method will prioritize using interrupts, and will fall back to Waiting the maximum measurement time if no interrupt pin as been configured.
+async fn wait_for_data<B: Bus, IntPin: Wait + InputPin, D: DelayNs, Out>(
+    device: &mut Bmp390<B>,
+    int_pin: &mut Option<IntPin>,
+    delay: &mut D,
+) -> TypeStateResult<Measurement<Out>, B::Error, IntPin::Error> {
+    if let Some(int_pin) = int_pin {
+        loop {
+            while int_pin.is_high().map_err(TypeStateError::Pin)? {
+                let int_status = device
+                    .read::<IntStatus>()
+                    .await
+                    .map_err(TypeStateError::Device)?;
+                if int_status.drdy {
+                    let data = device
+                        .read_sensor_data()
+                        .await
+                        .map_err(TypeStateError::Device)?;
+                    return Ok(Measurement::new(data.temperature, data.pressure));
+                }
+            }
+
+            int_pin
+                .wait_for_rising_edge()
+                .await
+                .map_err(TypeStateError::Pin)?;
+        }
+    } else {
+        delay.delay_us(device.maximum_measurement_time_us).await;
+
+        let data = device
+            .read_sensor_data()
+            .await
+            .map_err(TypeStateError::Device)?;
+        Ok(Measurement::new(data.temperature, data.pressure))
+    }
+}

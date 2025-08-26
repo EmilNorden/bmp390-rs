@@ -1,72 +1,78 @@
 use crate::bus::Bus;
 use crate::register::pwr_ctrl::PowerMode;
-use crate::typestate::sample::Sample;
+use crate::typestate::measurement::Measurement;
+use crate::typestate::{TypeStateError, TypeStateResult};
 use crate::{Bmp390, Bmp390Result, Interrupts};
 use core::marker::PhantomData;
 use embedded_hal::digital::InputPin;
+use embedded_hal_async::delay::DelayNs;
 use embedded_hal_async::digital::Wait;
-use crate::register::int_status::IntStatus;
 
-pub struct ForcedDevice<Out, B, IrqPin> {
+/// Represents a BMP390 device in [`PowerMode::Forced`].
+///
+/// Technically, the device spends more time in [`PowerMode::Sleep`], as Forced is only a transient state that triggers a measurement and then returns to Sleep mode.
+/// You can construct a [`ForcedDevice`] through a [`Bmp390Builder`].
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// # tokio_test::block_on(async {
+/// use bmp390_rs::typestate::Bmp390Builder;
+///
+/// let spi = setup_spi();
+/// let delay = setup_delay();
+///
+/// // Creates a ForcedDevice that uses SPI and outputs both pressure and temperature.
+///
+/// let forced_device = Bmp390Builder::new()
+///     .use_spi(spi)
+///     .enable_pressure()
+///     .enable_temperature()
+///     .into_forced(delay);
+///
+/// # });
+pub struct ForcedDevice<Out, B, IntPin, Delay> {
     device: Bmp390<B>,
-    irq_pin: Option<IrqPin>,
+    int_pin: Option<IntPin>,
+    delay: Delay,
     _phantom_data: PhantomData<Out>,
 }
 
-/*impl<B: Bus, IrqPin: Wait + InputPin> ForcedDevice<Pressure, B, IrqPin> {
-    async fn read_value_if_irq(&mut self) -> Bmp390Result<Option<Sample<Pressure>>, B::Error> {
-        let status = self.device.read::<Status>().await?;
-        if status.drdy_press {
-            let data = self.device.read_sensor_data().await?;
-
-            Ok(Some(Sample::new(0.0, data.pressure)))
-        }
-        else {
-            Ok(None)
-        }
-    }
-}*/
-
-impl<Out, B: Bus, IrqPin: Wait + InputPin> ForcedDevice<Out, B, IrqPin> {
-    pub(crate) async fn new(mut device: Bmp390<B>, irq_pin: Option<IrqPin>) -> Bmp390Result<ForcedDevice<Out, B, IrqPin>, B::Error> {
-        if irq_pin.is_some() {
-            device.mask_interrupts(Interrupts::new().fifo_full().fifo_watermark()).await?;
+impl<Out, B: Bus, IntPin: Wait + InputPin, Delay: DelayNs> ForcedDevice<Out, B, IntPin, Delay> {
+    pub(crate) async fn new(
+        mut device: Bmp390<B>,
+        int_pin: Option<IntPin>,
+        delay: Delay,
+    ) -> Bmp390Result<ForcedDevice<Out, B, IntPin, Delay>, B::Error> {
+        // If an interrupt pin is given, we want to setup the device to enable DRDY interrupts and disable FIFO interrupts.
+        if int_pin.is_some() {
+            device
+                .mask_interrupts(Interrupts::new().fifo_full().fifo_watermark())
+                .await?;
         }
         Ok(Self {
             device,
-            irq_pin,
+            int_pin,
+            delay,
             _phantom_data: PhantomData,
         })
     }
-    
-    pub async fn read_sample(&mut self) -> Bmp390Result<Sample<Out>, B::Error> {
-        self.device.set_mode(PowerMode::Forced).await?;
 
-        if let Some(irq_pin) = &mut self.irq_pin {
-            // TODO Remove unwrap here later
-            loop {
-                while irq_pin.is_high().unwrap() {
-                    let int_status = self.device.read::<IntStatus>().await?;
-                    if int_status.drdy {
-                        let data = self.device.read_sensor_data().await?;
-                        return Ok(Sample::new(data.temperature, data.pressure));
-                    }
-                }
+    /// Triggers a new measurement and waits for the results.
+    ///
+    /// If an interrupt pin was configured using the [`Bmp390Builder::use_irq`] method, this method will use the
+    /// [`Interrupts::data_ready()`] interrupt to wait for data. If no interrupt pin was configured, it will simply wait the
+    /// maximum measurement time as described by the datasheet section 3.9 before reading the data.
+    ///
+    /// The returned [`Measurement`] type will only provide you with the data you configured the device to return using the [`Bmp390Builder::enable_pressure`] and [`Bmp390Builder::enable_temperature`] methods.
+    pub async fn read_measurement(
+        &mut self,
+    ) -> TypeStateResult<Measurement<Out>, B::Error, IntPin::Error> {
+        self.device
+            .set_mode(PowerMode::Forced)
+            .await
+            .map_err(TypeStateError::Device)?;
 
-                // TODO Remove unwrap here later
-                irq_pin.wait_for_rising_edge().await.unwrap();
-            }
-
-        }
-
-        Ok(Sample::new(0.0, 0.0))
-        /*
-         There are multiple options for waiting for data to be ready:
-         1. Wait for the maximum measurement time as specified by the datasheet section 3.9.1. The datasheet mentions this in section 3.10:
-            "The timing for data readout in forced mode should be done so that the maximum measurement times are respected."
-         2. Poll drdy_press / drdy_temp from the Status register.
-         3. Wait for interrupts.
-         */
-
+        Ok(super::wait_for_data(&mut self.device, &mut self.int_pin, &mut self.delay).await?)
     }
 }

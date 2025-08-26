@@ -23,6 +23,7 @@ use crate::register::fifo_data::FifoData;
 use crate::register::fifo_length::FifoLength;
 use crate::register::int_ctrl::IntCtrl;
 use crate::register::int_status::{IntStatus, IntStatusFlags};
+use crate::register::osr::Oversampling;
 use crate::register::{
     InvalidRegisterField, Readable, Writable, chip_id, cmd, data, err_reg, odr, osr, pwr_ctrl,
     status,
@@ -30,7 +31,6 @@ use crate::register::{
 use core::fmt::Debug;
 use embedded_hal_async::delay::DelayNs;
 use embedded_hal_async::i2c::SevenBitAddress;
-use crate::register::osr::Oversampling;
 
 const BMP390_CHIP_ID: u8 = 0x60;
 
@@ -67,6 +67,7 @@ type Bmp390Spi<T> = Bmp390<Spi<T>>;
 pub struct Bmp390<B> {
     bus: B,
     calibration_data: CalibrationData,
+    maximum_measurement_time_us: u32,
 }
 
 impl<T> Bmp390I2c<T>
@@ -182,6 +183,12 @@ where
         Ok(Bmp390 {
             bus,
             calibration_data,
+            maximum_measurement_time_us: calculate_maximum_measurement_time(
+                config.enable_pressure,
+                config.enable_temperature,
+                config.pressure_oversampling,
+                config.temperature_oversampling,
+            ),
         })
     }
 
@@ -692,6 +699,27 @@ pub struct Measurement {
     pub temperature: f32,
 }
 
+/// Calculates an estimation of the maximum measurement time
+///
+/// See section 3.9.2 "Measurement rate in forced mode and normal mode" of the datasheet for an explanation of the equation.
+///
+/// This equation calculates the *typical* measurement time, so I multiply the result by 1.2 to get within range of the maximum
+/// time as denoted by table 23 in the datasheet.
+fn calculate_maximum_measurement_time(
+    pressure_enabled: bool,
+    temperature_enabled: bool,
+    pressure_oversampling: Oversampling,
+    temperature_oversampling: Oversampling,
+) -> u32 {
+    let osr_p: u8 = pressure_oversampling.into();
+    let osr_t: u8 = temperature_oversampling.into();
+    let typical_time = 234u32
+        + pressure_enabled as u32 * (392 + 2u32.pow(osr_p as u32) * 2020)
+        + temperature_enabled as u32 * (163 + 2u32.pow(osr_t as u32) * 2020);
+
+    (typical_time as f32 * 1.2) as u32
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -828,5 +856,63 @@ mod tests {
             FifoFrame::ControlFrame(ControlFrameType::ConfigChange),
             frame
         );
+    }
+
+    #[test]
+    fn calculate_maximum_measurement_time() {
+        // Test against the specified times in datasheet table 23.
+        let time = super::calculate_maximum_measurement_time(
+            true,
+            true,
+            Oversampling::X1,
+            Oversampling::X1,
+        );
+
+        assert!(time > 5700);
+
+        let time = super::calculate_maximum_measurement_time(
+            true,
+            true,
+            Oversampling::X2,
+            Oversampling::X1,
+        );
+
+        assert!(time > 7960);
+
+        let time = super::calculate_maximum_measurement_time(
+            true,
+            true,
+            Oversampling::X4,
+            Oversampling::X1,
+        );
+
+        assert!(time > 12480);
+
+        let time = super::calculate_maximum_measurement_time(
+            true,
+            true,
+            Oversampling::X8,
+            Oversampling::X1,
+        );
+
+        assert!(time > 21530);
+
+        let time = super::calculate_maximum_measurement_time(
+            true,
+            true,
+            Oversampling::X16,
+            Oversampling::X2,
+        );
+
+        assert!(time > 41890);
+
+        let time = super::calculate_maximum_measurement_time(
+            true,
+            true,
+            Oversampling::X32,
+            Oversampling::X2,
+        );
+
+        assert!(time > 78090);
     }
 }
