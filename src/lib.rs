@@ -7,6 +7,7 @@ pub mod register;
 
 pub mod fifo;
 pub mod testing;
+pub mod typestate;
 
 use crate::bus::{Bus, I2c, Spi};
 use crate::calibration::CalibrationData;
@@ -22,6 +23,7 @@ use crate::register::fifo_data::FifoData;
 use crate::register::fifo_length::FifoLength;
 use crate::register::int_ctrl::IntCtrl;
 use crate::register::int_status::{IntStatus, IntStatusFlags};
+use crate::register::osr::{Osr, OsrCfg, Oversampling};
 use crate::register::{
     InvalidRegisterField, Readable, Writable, chip_id, cmd, data, err_reg, odr, osr, pwr_ctrl,
     status,
@@ -65,6 +67,7 @@ type Bmp390Spi<T> = Bmp390<Spi<T>>;
 pub struct Bmp390<B> {
     bus: B,
     calibration_data: CalibrationData,
+    maximum_measurement_time_us: u32,
 }
 
 impl<T> Bmp390I2c<T>
@@ -125,6 +128,9 @@ impl<B> Bmp390<B>
 where
     B: Bus,
 {
+    /// Probes if the device is ready by attempting to read ChipId [`attempts`] times with a 1ms delay.
+    ///
+    /// Returns [`Bmp390Error::NotConnected`] if no response is received.
     async fn probe_ready<D: DelayNs>(
         bus: &mut B,
         delay: &mut D,
@@ -142,6 +148,10 @@ where
 
         Err(Bmp390Error::NotConnected)
     }
+
+    /// Creates a new instance of the Bmp390 driver struct with the given configuration.
+    ///
+    /// This method will attempt to probe for device ready and will fail early if the device does not respond.
     async fn new<D: DelayNs>(
         mut bus: B,
         config: Configuration,
@@ -178,6 +188,12 @@ where
         Ok(Bmp390 {
             bus,
             calibration_data,
+            maximum_measurement_time_us: calculate_maximum_measurement_time(
+                config.enable_pressure,
+                config.enable_temperature,
+                config.pressure_oversampling,
+                config.temperature_oversampling,
+            ),
         })
     }
 
@@ -229,6 +245,16 @@ where
         Ok(InterruptStatus::from(self.bus.read::<IntStatus>().await?))
     }
 
+    /// Returns the oversampling configuration from the OSR (0x1C) register.
+    pub async fn oversampling_config(&mut self) -> Bmp390Result<OsrCfg, B::Error> {
+        Ok(self.bus.read::<Osr>().await?)
+    }
+
+    /// Writes oversampling configuration to the OSR (0x1C) register.
+    pub async fn set_oversampling_config(&mut self, oversampling: &OsrCfg) -> Bmp390Result<(), B::Error> {
+        Ok(self.bus.write::<Osr>(oversampling).await?)
+    }
+
     /// Returns the current FIFO configuration. This is a combination of the fields stored in registers FIFO_CONFIG_1 (0x17) and FIFO_CONFIG_2 (0x18).
     ///
     /// You could theoretically access the same information using [`Bmp390::read::<FifoConfig1>`] and [`Bmp390::read::<FifoConfig2>`].
@@ -260,11 +286,11 @@ where
     ) -> Bmp390Result<(), B::Error> {
         self.bus
             .write::<FifoConfig1>(&FifoConfig1Fields {
-                fifo_mode: cfg.enable_fifo(),
+                fifo_mode: cfg.fifo_enabled(),
                 fifo_stop_on_full: cfg.fifo_full_behavior() == FifoFullBehavior::Stop,
-                fifo_time_en: cfg.enable_time(),
-                fifo_press_en: cfg.enable_pressure(),
-                fifo_temp_en: cfg.enable_temperature(),
+                fifo_time_en: cfg.time_enabled(),
+                fifo_press_en: cfg.pressure_enabled(),
+                fifo_temp_en: cfg.temperature_enabled(),
             })
             .await?;
 
@@ -683,9 +709,31 @@ impl Interrupts {
 }
 
 /// Holds calibrated pressure and temperature samples.
+#[derive(Copy, Clone, Debug)]
 pub struct Measurement {
     pub pressure: f32,
     pub temperature: f32,
+}
+
+/// Calculates an estimation of the maximum measurement time
+///
+/// See section 3.9.2 "Measurement rate in forced mode and normal mode" of the datasheet for an explanation of the equation.
+///
+/// This equation calculates the *typical* measurement time, so I multiply the result by 1.2 to get within range of the maximum
+/// time as denoted by table 23 in the datasheet.
+fn calculate_maximum_measurement_time(
+    pressure_enabled: bool,
+    temperature_enabled: bool,
+    pressure_oversampling: Oversampling,
+    temperature_oversampling: Oversampling,
+) -> u32 {
+    let osr_p: u8 = pressure_oversampling.into();
+    let osr_t: u8 = temperature_oversampling.into();
+    let typical_time = 234u32
+        + pressure_enabled as u32 * (392 + 2u32.pow(osr_p as u32) * 2020)
+        + temperature_enabled as u32 * (163 + 2u32.pow(osr_t as u32) * 2020);
+
+    (typical_time as f32 * 1.2) as u32
 }
 
 #[cfg(test)]
@@ -824,5 +872,63 @@ mod tests {
             FifoFrame::ControlFrame(ControlFrameType::ConfigChange),
             frame
         );
+    }
+
+    #[test]
+    fn calculate_maximum_measurement_time() {
+        // Test against the specified times in datasheet table 23.
+        let time = super::calculate_maximum_measurement_time(
+            true,
+            true,
+            Oversampling::X1,
+            Oversampling::X1,
+        );
+
+        assert!(time > 5700);
+
+        let time = super::calculate_maximum_measurement_time(
+            true,
+            true,
+            Oversampling::X2,
+            Oversampling::X1,
+        );
+
+        assert!(time > 7960);
+
+        let time = super::calculate_maximum_measurement_time(
+            true,
+            true,
+            Oversampling::X4,
+            Oversampling::X1,
+        );
+
+        assert!(time > 12480);
+
+        let time = super::calculate_maximum_measurement_time(
+            true,
+            true,
+            Oversampling::X8,
+            Oversampling::X1,
+        );
+
+        assert!(time > 21530);
+
+        let time = super::calculate_maximum_measurement_time(
+            true,
+            true,
+            Oversampling::X16,
+            Oversampling::X2,
+        );
+
+        assert!(time > 41890);
+
+        let time = super::calculate_maximum_measurement_time(
+            true,
+            true,
+            Oversampling::X32,
+            Oversampling::X2,
+        );
+
+        assert!(time > 78090);
     }
 }

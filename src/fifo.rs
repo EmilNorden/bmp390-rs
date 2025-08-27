@@ -1,9 +1,9 @@
 #[derive(Copy, Clone, Debug)]
 pub struct FifoConfiguration {
-    enable_fifo: bool,
-    enable_pressure: bool,
-    enable_temperature: bool,
-    enable_time: bool,
+    fifo_enabled: bool,
+    pressure_enabled: bool,
+    temperature_enabled: bool,
+    time_enabled: bool,
     full_behavior: FifoFullBehavior,
     subsampling: u8,
     apply_iir_filter: bool,
@@ -12,10 +12,10 @@ pub struct FifoConfiguration {
 impl Default for FifoConfiguration {
     fn default() -> Self {
         Self {
-            enable_fifo: false,
-            enable_pressure: false,
-            enable_temperature: false,
-            enable_time: false,
+            fifo_enabled: false,
+            pressure_enabled: false,
+            temperature_enabled: false,
+            time_enabled: false,
             full_behavior: FifoFullBehavior::Stop,
             subsampling: 0x02,
             apply_iir_filter: false,
@@ -25,64 +25,78 @@ impl Default for FifoConfiguration {
 
 impl FifoConfiguration {
     pub fn new(
-        enable_fifo: bool,
-        enable_pressure: bool,
-        enable_temperature: bool,
-        enable_time: bool,
+        fifo_enabled: bool,
+        pressure_enabled: bool,
+        temperature_enabled: bool,
+        time_enabled: bool,
         full_behavior: FifoFullBehavior,
         subsampling: u8,
         apply_iir_filter: bool)
         -> Self {
         Self {
-            enable_fifo,
-            enable_pressure,
-            enable_temperature,
-            enable_time,
+            fifo_enabled,
+            pressure_enabled,
+            temperature_enabled,
+            time_enabled,
             full_behavior,
             subsampling,
             apply_iir_filter,
         }
     }
 
-    pub fn enable_fifo(&self) -> bool { self.enable_fifo }
-    pub fn set_enable_fifo(mut self, enabled: bool){
-        self.enable_fifo = enabled;
+    pub fn fifo_enabled(&self) -> bool { self.fifo_enabled }
+    pub fn set_fifo_enabled(mut self, enabled: bool) -> Self {
+        self.fifo_enabled = enabled;
+        
+        self
     }
 
-    pub fn enable_pressure(&self) -> bool { self.enable_pressure }
+    pub fn pressure_enabled(&self) -> bool { self.pressure_enabled }
 
-    pub fn set_enable_pressure(mut self, enabled: bool) {
-        self.enable_pressure = enabled;
+    pub fn set_pressure_enabled(mut self, enabled: bool) -> Self {
+        self.pressure_enabled = enabled;
+        
+        self
     }
 
-    pub fn enable_temperature(&self) -> bool { self.enable_temperature}
+    pub fn temperature_enabled(&self) -> bool { self.temperature_enabled }
 
-    pub fn set_enable_temperature(mut self, enabled: bool) {
-        self.enable_temperature = enabled;
+    pub fn set_temperature_enabled(mut self, enabled: bool) -> Self {
+        self.temperature_enabled = enabled;
+        
+        self
     }
 
-    pub fn enable_time(&self) -> bool { self.enable_time }
+    pub fn time_enabled(&self) -> bool { self.time_enabled }
 
-    pub fn set_enable_time(mut self, enabled: bool) {
-        self.enable_time = enabled;
+    pub fn set_time_enabled(mut self, enabled: bool) -> Self {
+        self.time_enabled = enabled;
+        
+        self
     }
 
     pub fn fifo_full_behavior(&self) -> FifoFullBehavior { self.full_behavior }
 
-    pub fn set_fifo_full_behavior(mut self, behavior: FifoFullBehavior) {
+    pub fn set_fifo_full_behavior(mut self, behavior: FifoFullBehavior) -> Self{
         self.full_behavior = behavior;
+        
+        self
     }
 
     pub fn subsampling(&self) -> u8 { self.subsampling }
 
-    pub fn set_subsampling(mut self, subsampling: u8) {
+    pub fn set_subsampling(mut self, subsampling: u8) -> Self{
         self.subsampling = subsampling;
+        
+        self
     }
 
     pub fn apply_iir_filter(&self) -> bool { self.apply_iir_filter }
 
-    pub fn set_apply_iir_filter(mut self, apply_iir_filter: bool) {
+    pub fn set_apply_iir_filter(mut self, apply_iir_filter: bool) -> Self {
         self.apply_iir_filter = apply_iir_filter;
+        
+        self
     }
 }
 
