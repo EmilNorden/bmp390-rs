@@ -1,55 +1,30 @@
 use crate::bus::Bus;
 use crate::register::pwr_ctrl::PowerMode;
 use crate::typestate::measurement::Measurement;
-use crate::typestate::{TypeStateError, TypeStateResult};
+use crate::typestate::{Bmp390Mode, Forced, OutputConfig, TypeStateError, TypeStateResult};
 use crate::{Bmp390, Bmp390Result, Interrupts};
 use core::marker::PhantomData;
 use embedded_hal::digital::InputPin;
 use embedded_hal_async::delay::DelayNs;
 use embedded_hal_async::digital::Wait;
 
-/// Represents a BMP390 device in [`PowerMode::Forced`].
-///
-/// Technically, the device spends more time in [`PowerMode::Sleep`], as Forced is only a transient state that triggers a measurement and then returns to Sleep mode.
-/// You can construct a [`ForcedDevice`] through a [`Bmp390Builder`].
-///
-/// # Examples
-///
-/// ```rust,ignore
-/// # tokio_test::block_on(async {
-/// use bmp390_rs::typestate::Bmp390Builder;
-///
-/// let spi = setup_spi();
-/// let delay = setup_delay();
-///
-/// // Creates a ForcedDevice that uses SPI and outputs both pressure and temperature.
-///
-/// let forced_device = Bmp390Builder::new()
-///     .use_spi(spi)
-///     .enable_pressure()
-///     .enable_temperature()
-///     .into_forced(delay);
-///
-/// # });
-pub struct ForcedDevice<Out, B, IntPin, Delay> {
-    device: Bmp390<B>,
-    int_pin: Option<IntPin>,
-    delay: Delay,
-    _phantom_data: PhantomData<Out>,
-}
-
-impl<Out, B: Bus, IntPin: Wait + InputPin, Delay: DelayNs> ForcedDevice<Out, B, IntPin, Delay> {
+impl<Out: OutputConfig, B: Bus, IntPin: Wait + InputPin, Delay: DelayNs, const USE_FIFO: bool>
+    Bmp390Mode<Forced, Out, B, IntPin, Delay, USE_FIFO>
+{
     pub(crate) async fn new(
         mut device: Bmp390<B>,
         int_pin: Option<IntPin>,
         delay: Delay,
-    ) -> Bmp390Result<ForcedDevice<Out, B, IntPin, Delay>, B::Error> {
+    ) -> Bmp390Result<Bmp390Mode<Forced, Out, B, IntPin, Delay, USE_FIFO>, B::Error> {
         // If an interrupt pin is given, we want to setup the device to enable DRDY interrupts and disable FIFO interrupts.
         if int_pin.is_some() {
             device
                 .mask_interrupts(Interrupts::new().fifo_full().fifo_watermark())
                 .await?;
         }
+
+        Self::configure(&mut device).await?;
+
         Ok(Self {
             device,
             int_pin,
@@ -57,7 +32,11 @@ impl<Out, B: Bus, IntPin: Wait + InputPin, Delay: DelayNs> ForcedDevice<Out, B, 
             _phantom_data: PhantomData,
         })
     }
+}
 
+impl<Out: OutputConfig, B: Bus, IntPin: Wait + InputPin, Delay: DelayNs>
+Bmp390Mode<Forced, Out, B, IntPin, Delay, false>
+{
     /// Triggers a new measurement and waits for the results.
     ///
     /// If an interrupt pin was configured using the [`Bmp390Builder::use_irq`] method, this method will use the
@@ -73,6 +52,22 @@ impl<Out, B: Bus, IntPin: Wait + InputPin, Delay: DelayNs> ForcedDevice<Out, B, 
             .await
             .map_err(TypeStateError::Device)?;
 
-        Ok(super::wait_for_data(&mut self.device, &mut self.int_pin, &mut self.delay).await?)
+        Ok(self.wait_for_data().await?)
+    }
+}
+
+impl<Out: OutputConfig, B: Bus, IntPin: Wait + InputPin, Delay: DelayNs>
+Bmp390Mode<Forced, Out, B, IntPin, Delay, true>
+{
+    /// Triggers a new measurement and stores the result in the FIFO for later consumption.'
+    ///
+    /// The measurement can be read-out using the [`Bmp390Mode::dequeue()´] method.
+    pub async fn enqueue_measurement(&mut self) -> TypeStateResult<(), B::Error, IntPin::Error> {
+        self.device
+            .set_mode(PowerMode::Forced)
+            .await
+            .map_err(TypeStateError::Device)?;
+
+        Ok(())
     }
 }

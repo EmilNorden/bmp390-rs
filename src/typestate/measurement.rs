@@ -1,7 +1,8 @@
+use crate::typestate::{Pressure, PressureAndTemperature, Temperature};
 use core::fmt::{Debug, Formatter};
 use core::marker::PhantomData;
-use crate::typestate::{Pressure, PressureAndTemperature, Temperature};
 
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Measurement<Out> {
     temperature_c: f32,
     pressure_pa: f32,
@@ -10,7 +11,11 @@ pub struct Measurement<Out> {
 
 impl<Out> Measurement<Out> {
     pub fn new(temperature_c: f32, pressure_pa: f32) -> Self {
-        Self { temperature_c, pressure_pa, _phantom: PhantomData }
+        Self {
+            temperature_c,
+            pressure_pa,
+            _phantom: PhantomData,
+        }
     }
 }
 
@@ -23,7 +28,7 @@ impl Measurement<Pressure> {
 impl Debug for Measurement<Pressure> {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Measurement")
-            .field("pressure_pa",  &self.pressure_pa)
+            .field("pressure_pa", &self.pressure_pa)
             .finish()
     }
 }
@@ -37,7 +42,7 @@ impl Measurement<Temperature> {
 impl Debug for Measurement<Temperature> {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Sample")
-            .field("temperature_c",  &self.temperature_c)
+            .field("temperature_c", &self.temperature_c)
             .finish()
     }
 }
@@ -55,8 +60,8 @@ impl Measurement<PressureAndTemperature> {
 impl Debug for Measurement<PressureAndTemperature> {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Sample")
-            .field("pressure_pa",  &self.pressure_pa)
-            .field("temperature_c",  &self.temperature_c)
+            .field("pressure_pa", &self.pressure_pa)
+            .field("temperature_c", &self.temperature_c)
             .finish()
     }
 }
@@ -70,7 +75,9 @@ impl Measurement<Pressure> {
 #[cfg(feature = "uom")]
 impl Measurement<Temperature> {
     pub fn temperature_uom(&self) -> uom::si::f32::ThermodynamicTemperature {
-        uom::si::thermodynamic_temperature::ThermodynamicTemperature::new::<uom::si::thermodynamic_temperature::degree_celsius>(self.temperature_c)
+        uom::si::thermodynamic_temperature::ThermodynamicTemperature::new::<
+            uom::si::thermodynamic_temperature::degree_celsius,
+        >(self.temperature_c)
     }
 }
 
@@ -81,6 +88,8 @@ impl Measurement<PressureAndTemperature> {
     }
 
     pub fn temperature_uom(&self) -> uom::si::f32::ThermodynamicTemperature {
-        uom::si::thermodynamic_temperature::ThermodynamicTemperature::new::<uom::si::thermodynamic_temperature::degree_celsius>(self.temperature_c)
+        uom::si::thermodynamic_temperature::ThermodynamicTemperature::new::<
+            uom::si::thermodynamic_temperature::degree_celsius,
+        >(self.temperature_c)
     }
 }

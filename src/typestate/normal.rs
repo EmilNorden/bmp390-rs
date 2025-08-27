@@ -1,44 +1,15 @@
 use crate::bus::Bus;
-use crate::register::pwr_ctrl::PowerMode;
 use crate::typestate::measurement::Measurement;
-use crate::typestate::TypeStateResult;
+use crate::typestate::{Bmp390Mode, Normal, OutputConfig, TypeStateResult};
 use crate::{Bmp390, Bmp390Result, Interrupts};
 use core::marker::PhantomData;
 use embedded_hal::digital::InputPin;
 use embedded_hal_async::delay::DelayNs;
 use embedded_hal_async::digital::Wait;
 
-/// Represents a BMP390 device in [`PowerMode::Normal`].
-///
-/// In this mode, the device will continuously produce new measurements for readout in the Data registers.
-///
-/// # Examples
-///
-/// ```rust,ignore
-/// # tokio_test::block_on(async {
-/// use bmp390_rs::typestate::Bmp390Builder;
-///
-/// let spi = setup_spi();
-/// let delay = setup_delay();
-///
-/// // Creates a NormalDevice that uses SPI and outputs both pressure and temperature.
-///
-/// let forced_device = Bmp390Builder::new()
-///     .use_spi(spi)
-///     .enable_pressure()
-///     .enable_temperature()
-///     .into_normal(delay);
-///
-/// # });
-pub struct NormalDevice<Out, B, IntPin, Delay> {
-    device: Bmp390<B>,
-    int_pin: Option<IntPin>,
-    delay: Delay,
-    _phantom_data: PhantomData<Out>,
-}
-
-impl<Out, B: Bus, IntPin: Wait + InputPin, Delay: DelayNs> NormalDevice<Out, B, IntPin, Delay> {
-
+impl<Out: OutputConfig, B: Bus, IntPin: Wait + InputPin, Delay: DelayNs, const USE_FIFO: bool>
+    Bmp390Mode<Normal, Out, B, IntPin, Delay, USE_FIFO>
+{
     pub(crate) async fn new(
         mut device: Bmp390<B>,
         int_pin: Option<IntPin>,
@@ -50,6 +21,9 @@ impl<Out, B: Bus, IntPin: Wait + InputPin, Delay: DelayNs> NormalDevice<Out, B, 
                 .mask_interrupts(Interrupts::new().fifo_full().fifo_watermark())
                 .await?;
         }
+
+        Self::configure(&mut device).await?;
+        
         Ok(Self {
             device,
             int_pin,
@@ -57,7 +31,19 @@ impl<Out, B: Bus, IntPin: Wait + InputPin, Delay: DelayNs> NormalDevice<Out, B, 
             _phantom_data: PhantomData,
         })
     }
-
+}
+/*
+TODO: Iterators are synchronous by nature. AsyncIterators seems to be experimental. Look into Streams instead. Perhaps feature-gated since it looks like it will pull in extra dependencies.
+pub struct MeasurementIterator<'a, B: Bus, Out, IntPin, Delay> {
+    int_pin: &'a mut Option<IntPin>,
+    device:  &'a mut Bmp390<B>,
+    delay:   &'a mut Delay,
+    _phantom: PhantomData<Out>,
+}
+*/
+impl<Out: OutputConfig, B: Bus, IntPin: Wait + InputPin, Delay: DelayNs>
+Bmp390Mode<Normal, Out, B, IntPin, Delay, false>
+{
     /// Reads the latest measurement from the device.
     ///
     /// This method will not synchronize data readout with the configured measurement rate, so if you're calling
@@ -73,20 +59,9 @@ impl<Out, B: Bus, IntPin: Wait + InputPin, Delay: DelayNs> NormalDevice<Out, B, 
     /// If an interrupt pin was configured using the [`Bmp390Builder::use_irq`] method, this method will use the
     /// [`Interrupts::data_ready()`] interrupt to wait for data. If no interrupt pin was configured, it will simply wait the
     /// maximum measurement time as described by the datasheet section 3.9 before reading the data.
-    pub async fn read_next_measurement(&mut self) -> TypeStateResult<Measurement<Out>, B::Error, IntPin::Error> {
-        Ok(super::wait_for_data(
-            &mut self.device,
-            &mut self.int_pin,
-            &mut self.delay).await?)
+    pub async fn read_next_measurement(
+        &mut self,
+    ) -> TypeStateResult<Measurement<Out>, B::Error, IntPin::Error> {
+        Ok(self.wait_for_data().await?)
     }
 }
-/*
-TODO: Iterators are synchronous by nature. AsyncIterators seems to be experimental. Look into Streams instead. Perhaps feature-gated since it looks like it will pull in extra dependencies.
-pub struct MeasurementIterator<'a, B: Bus, Out, IntPin, Delay> {
-    int_pin: &'a mut Option<IntPin>,
-    device:  &'a mut Bmp390<B>,
-    delay:   &'a mut Delay,
-    _phantom: PhantomData<Out>,
-}
-*/
-
