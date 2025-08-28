@@ -1,4 +1,4 @@
-use crate::Bmp390Error;
+use crate::error::Bmp390Error;
 use crate::register::{Readable, Writable};
 
 pub(crate) const MAX_REG_BYTES:usize = 22;

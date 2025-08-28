@@ -2,11 +2,12 @@ use crate::bus::Bus;
 use crate::register::pwr_ctrl::PowerMode;
 use crate::typestate::measurement::Measurement;
 use crate::typestate::{Bmp390Mode, Forced, OutputConfig, TypeStateError, TypeStateResult};
-use crate::{Bmp390, Bmp390Result, Interrupts};
+use crate::{Bmp390, Bmp390Result};
 use core::marker::PhantomData;
 use embedded_hal::digital::InputPin;
 use embedded_hal_async::delay::DelayNs;
 use embedded_hal_async::digital::Wait;
+use crate::bmp390::Interrupts;
 
 impl<Out: OutputConfig, B: Bus, IntPin: Wait + InputPin, Delay: DelayNs, const USE_FIFO: bool>
     Bmp390Mode<Forced, Out, B, IntPin, Delay, USE_FIFO>

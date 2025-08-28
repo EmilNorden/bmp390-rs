@@ -1,10 +1,11 @@
+use crate::bus::{Bus, MAX_REG_BYTES};
+use crate::config::Configuration;
+use crate::error::Bmp390Error;
+use crate::register::{Readable, Writable};
+use crate::Bmp390;
 use embassy_time::Delay;
 use embedded_hal_async::delay::DelayNs;
 use heapless::LinearMap;
-use crate::{Bmp390, Bmp390Error};
-use crate::bus::{Bus, MAX_REG_BYTES};
-use crate::config::Configuration;
-use crate::register::{Readable, Writable};
 
 #[derive(Debug)]
 enum RegisterValue {
@@ -68,12 +69,4 @@ impl<const N: usize> Bus for FakeBus<N> {
     async fn write<W: Writable>(&mut self, _v: &W::In) -> Result<(), Bmp390Error<Self::Error>> {
         Ok(())
     }
-}
-
-pub async fn dummy_device() -> Bmp390<FakeBus<10>> {
-   Bmp390::new(
-       FakeBus::new(),
-       Configuration::default(),
-       &mut Delay{}
-   ).await.unwrap()
 }

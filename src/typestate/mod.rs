@@ -9,13 +9,14 @@ use crate::fifo::{ControlFrameType, FifoConfiguration, FifoFrame, SensorFrameTyp
 use crate::register::int_status::IntStatus;
 use crate::register::osr::{Osr, OsrCfg};
 use crate::typestate::measurement::Measurement;
-use crate::{Bmp390, Bmp390Error, Bmp390Result};
+use crate::{Bmp390, Bmp390Result};
 use core::marker::PhantomData;
 use embedded_hal::digital::{Error, ErrorKind, ErrorType, InputPin};
 use embedded_hal_async::delay::DelayNs;
 use embedded_hal_async::digital::Wait;
 
 pub use builder::Bmp390Builder;
+use crate::error::Bmp390Error;
 
 #[derive(Debug)]
 pub enum TypeStateError<BusError, PinError> {
@@ -95,7 +96,7 @@ impl<Mode, Out: OutputConfig, B: Bus, IntPin: Wait + InputPin, Delay: DelayNs, c
             }
         } else {
             self.delay
-                .delay_us(self.device.maximum_measurement_time_us)
+                .delay_us(self.device.max_measurement_time_us())
                 .await;
 
             let data = self
