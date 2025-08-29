@@ -1,3 +1,26 @@
+//! This module provides a high-level interface that encodes BMP390 modes in the type system.
+//!
+//! Where [`Bmp390`] is the main driver struct for the core interface, the [`Bmp390Mode`] struct is the main type of the typestate interface.
+//!
+//! The entrypoint to this interface is using the [`Bmp390Builder`] type, which lets you perform multiple configurations that will affect the resulting [`Bmp390Mode`] type.:
+//! - **Normal mode**
+//! 
+//!     In `Normal` mode, the resulting type will provide methods to read the last measurement or wait[^1] for the next measurement.
+//! 
+//!     Enable this mode by calling [`Bmp390Builder::into_normal`].
+//!
+//!     **Planned feature:** The aim is that `Normal` mode should feel like dealing with a stream of measurements, so in the future I will look into implementing either async iterators (once stable), or Streams.
+//! - **Forced mode**
+//! 
+//!     In `Forced` mode, the resulting type will provide methods to perform "one-shot" measurements and wait[^1] for the data before returning.
+//!     
+//!     Enable this mode by calling [`Bmp390Builder::into_forced`].
+//! 
+//! - **FIFO mode**
+//! 
+//!     While not strictly a mode, `FIFO` can be enabled together with either `Normal` or `Forced` mode. This will change the abstraction to let you view the BMP390 device as a queue.
+//! 
+//! [^1] When waiting for the measurement data the [`Bmp390Mode`] will use interrupts if configured in the [`Bmp390Builder`] (using [`Bmp390Builder::use_irq`]), otherwise it will delay period of time based on the output data rate..
 mod fifo;
 mod forced;
 mod measurement;
@@ -18,13 +41,18 @@ use embedded_hal_async::digital::Wait;
 pub use builder::Bmp390Builder;
 use crate::error::Bmp390Error;
 
+/// This represents all possible errors that can occur when using the typestate interface.
 #[derive(Debug)]
 pub enum TypeStateError<BusError, PinError> {
+    /// An error has occurred in the core driver.
     Device(Bmp390Error<BusError>),
+    /// An error has occurred with the interrupt pin.
     Pin(PinError),
+    /// This error occurs when attempting to read from the FIFO and a control frame of type configuration error is returned.
     FifoConfigError,
 }
 
+/// Type alias used to simplify return types throughout the typestate interface.
 pub type TypeStateResult<T, BusError, PinError> = Result<T, TypeStateError<BusError, PinError>>;
 
 /// Marker struct for the Forced mode
@@ -160,10 +188,14 @@ Bmp390Mode<Mode, Out, B, IntPin, Delay, USE_FIFO>
         Ok(self.device.fifo_length().await.map_err(TypeStateError::Device)?)
     }
 
+    /// Returns true if [`Bmp390Mode::length´] == 0
     pub async fn is_empty(&mut self) -> TypeStateResult<bool, B::Error, IntPin::Error> {
         Ok(self.length().await? == 0)
     }
 
+    /// Dequeues a frame from the FIFO.
+    ///
+    /// If there are no more frames ([`Bmp390Mode::length`] == 0), ([`FifoOutput::SensorTime`]) is returned.
     pub async fn dequeue(&mut self) -> TypeStateResult<FifoOutput<Out>, B::Error, IntPin> {
         loop {
             let frame = self
@@ -200,30 +232,40 @@ Bmp390Mode<Mode, Out, B, IntPin, Delay, USE_FIFO>
     }
 }
 
+/// Represents the different FIFO frames that can be read from the on-board FIFO.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum FifoOutput<Out> {
+    /// Sensor measurement frame. The [`Measurement´] type that this enum variant holds is generic over the output configured when creating the [`Bmp390Mode`].
     Measurement(Measurement<Out>),
+    /// Sensor time frame. This frame is produced when there are no more frames in the FIFO and sensor time is enabled.
     SensorTime(u32),
+    /// Empty FIFO frame. This frame is produced when there are no more frames in the FIFO and sensor time is not enabled.
     Empty,
 }
 
-
+/// Trait implemented by the marker types [`NoOutput`], [`Temperature`], [`Pressure`] and [`PressureAndTemperature`]
+/// It is used when configuring the BMP390 device, to convey which outputs should be enabled.
 pub trait OutputConfig {
+    /// Should pressure output be enabled?
     const PRESSURE: bool = false;
+    /// Should temperature output be enabled?
     const TEMPERATURE: bool = false;
 }
-
+/// Marker type for [`Bmp390Mode`] that has not yet been configured to output anything.
 pub struct NoOutput;
 impl OutputConfig for NoOutput {}
 
+/// Marker type for [`Bmp390Mode`] configured to output temperature.
 pub struct Temperature;
 impl OutputConfig for Temperature {
     const TEMPERATURE: bool = true;
 }
+/// Marker type for [`Bmp390Mode`] configured to output pressure.
 pub struct Pressure;
 impl OutputConfig for Pressure {
     const PRESSURE: bool = true;
 }
+/// Marker type for [`Bmp390Mode`] configured to output both pressure and temperature.
 pub struct PressureAndTemperature;
 impl OutputConfig for PressureAndTemperature {
     const PRESSURE: bool = true;
@@ -241,6 +283,7 @@ pub struct NoBus;
 #[derive(Debug)]
 pub struct NoPin;
 
+/// Error type for [`NoPin`]. Required for [`NoPin`] to implement the [`embedded_hal_async::digital::Wait`] and [`embedded_hal::digital::InputPin`] traits.
 #[derive(Debug)]
 pub struct NoPinError;
 

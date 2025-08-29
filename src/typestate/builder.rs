@@ -26,6 +26,7 @@ pub struct Bmp390Builder<
 
 /// Methods available on Bmp390Builder when no bus or output has been configured yet.
 impl Bmp390Builder<NoMode, NoOutput, NoBus, NoPin> {
+    /// Creates a new instance of [`Bmp390Builder`].
     pub fn new() -> Self {
         Self {
             bus: None,
@@ -42,6 +43,9 @@ impl Bmp390Builder<NoMode, NoOutput, NoBus, NoPin> {
 
 /// Methods available on the Bmp390Builder when FIFO has not been enabled
 impl<Mode, Out, B, IntPin> Bmp390Builder<Mode, Out, B, IntPin, false> {
+    /// Configures the resulting [`Bmp390Mode`] instance to be used with the on-board FIFO.
+    /// 
+    /// This will change how you interact with the [`Bmp390`] instance, enabling you to use it as a queue abstraction.
     pub fn use_fifo(self) -> Bmp390Builder<Mode, Out, B, IntPin, true> {
         Bmp390Builder {
             bus: self.bus,
@@ -119,6 +123,7 @@ impl<Mode, Out, B, const USE_FIFO: bool> Bmp390Builder<Mode, Out, B, NoPin, USE_
 
 /// Methods available on Bmp390Builder when no mode has been configured yet.
 impl<Out, B, IntPin, const USE_FIFO: bool> Bmp390Builder<NoMode, Out, B, IntPin, USE_FIFO> {
+    /// Configures the resulting [`Bmp390Mode`] instance for [`Normal`] mode.
     pub fn into_normal(self) -> Bmp390Builder<Normal, Out, B, IntPin, USE_FIFO> {
         Bmp390Builder {
             bus: self.bus,
@@ -129,6 +134,7 @@ impl<Out, B, IntPin, const USE_FIFO: bool> Bmp390Builder<NoMode, Out, B, IntPin,
         }
     }
 
+    /// Configures the resulting [`Bmp390Mode`] instance for [`Forced`] mode.
     pub fn into_forced(self) -> Bmp390Builder<Forced, Out, B, IntPin, USE_FIFO> {
         Bmp390Builder {
             bus: self.bus,
@@ -142,6 +148,7 @@ impl<Out, B, IntPin, const USE_FIFO: bool> Bmp390Builder<NoMode, Out, B, IntPin,
 
 /// Methods available on Bmp390Builder when no output has been configured yet.
 impl<Mode, B, IntPin, const USE_FIFO: bool> Bmp390Builder<Mode, NoOutput, B, IntPin, USE_FIFO> {
+    /// Enables pressure output.
     pub fn enable_pressure(self) -> Bmp390Builder<Mode, Pressure, B, IntPin, USE_FIFO> {
         Bmp390Builder {
             bus: self.bus,
@@ -152,6 +159,7 @@ impl<Mode, B, IntPin, const USE_FIFO: bool> Bmp390Builder<Mode, NoOutput, B, Int
         }
     }
 
+    /// Enables temperature output.
     pub fn enable_temperature(self) -> Bmp390Builder<Mode, Temperature, B, IntPin, USE_FIFO> {
         Bmp390Builder {
             bus: self.bus,
@@ -165,6 +173,7 @@ impl<Mode, B, IntPin, const USE_FIFO: bool> Bmp390Builder<Mode, NoOutput, B, Int
 
 /// Methods available on Bmp390Builder when pressure output has been configured.
 impl<Mode, B, IntPin, const USE_FIFO: bool> Bmp390Builder<Mode, Pressure, B, IntPin, USE_FIFO> {
+    /// Enables temperature output.
     pub fn enable_temperature(
         self,
     ) -> Bmp390Builder<Mode, PressureAndTemperature, B, IntPin, USE_FIFO> {
@@ -180,6 +189,7 @@ impl<Mode, B, IntPin, const USE_FIFO: bool> Bmp390Builder<Mode, Pressure, B, Int
 
 /// Methods available on Bmp390Builder when temperature output has been configured.
 impl<Mode, B, IntPin, const USE_FIFO: bool> Bmp390Builder<Mode, Temperature, B, IntPin, USE_FIFO> {
+    /// Enables pressure output.
     pub fn enable_pressure(
         self,
     ) -> Bmp390Builder<Mode, PressureAndTemperature, B, IntPin, USE_FIFO> {
@@ -198,6 +208,12 @@ impl<Mode, B, IntPin, const USE_FIFO: bool> Bmp390Builder<Mode, Temperature, B, 
 impl<Out: OutputConfig, B: Bus, IntPin: Wait + InputPin, const USE_FIFO: bool>
 Bmp390Builder<Normal, Out, B, IntPin, USE_FIFO>
 {
+    /// Returns a [`Bmp390Mode`] instance using the given configuration.
+    /// This will initialize the main driver struct and perform the same initialization as if you
+    /// called [`Bmp390::new_spi`] or [`Bmp390::new_i2c`]:
+    /// - Probe for a connected BMP390 device.
+    /// - Apply the given configuration
+    /// - Load calibration coefficients from NVM
     pub async fn build<D: DelayNs>(
         self,
         mut delay: D,
@@ -215,6 +231,12 @@ Bmp390Builder<Normal, Out, B, IntPin, USE_FIFO>
 impl<Out: OutputConfig, B: Bus, IntPin: Wait + InputPin, const USE_FIFO: bool>
 Bmp390Builder<Forced, Out, B, IntPin, USE_FIFO>
 {
+    /// Returns a [`Bmp390Mode`] instance using the given configuration.
+    /// This will initialize the main driver struct and perform the same initialization as if you
+    /// called [`Bmp390::new_spi`] or [`Bmp390::new_i2c`]:
+    /// - Probe for a connected BMP390 device.
+    /// - Apply the given configuration
+    /// - Load calibration coefficients from NVM
     pub async fn build<D: DelayNs>(
         self,
         mut delay: D,

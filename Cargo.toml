@@ -1,6 +1,6 @@
 [package]
 name = "bmp390-rs"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 keywords = ["embedded-hal", "pressure", "sensor", "altitude", "async"]
@@ -11,13 +11,11 @@ categories = ["aerospace", "asynchronous", "embedded", "hardware-support", "no-s
 [dependencies]
 embedded-hal-async = { version = "1.0.0", optional = true}
 embedded-hal = {version = "1.0.0" }
-embassy-time = "0.4.0"
 heapless = "0.8.0"
 uom = { version = "0.37.0", default-features = false, features = ["si", "f32"], optional = true }
 
 [dev-dependencies]
 tokio = { version = "1.47.1", features = ["macros", "rt", "time"]}
-tokio-test = "0.4.4"
 
 [features]
 default = ["async"]

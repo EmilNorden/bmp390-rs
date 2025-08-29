@@ -85,7 +85,6 @@ info!("{:?}", measurement);
 Here is an example of a Bmp390 device in *forced* mode and with the on-board FIFO enabled:
 ```rust
 use bmp390_rs::typestate::{Bmp390Builder, FifoOutput};
-
 /* Creates a forced mode Bmp390 that uses the FIFO. 
     This will give you a queue abstraction over the core driver. */
 let mut device = Bmp390Builder::new()

@@ -1,14 +1,69 @@
+//! ### FIFO_CONFIG_1/2 - FIFO configuration (`0x17/0x18`, 1 byte, R/W)
+//!
+//! Contains FIFO configuration.
+//!
+//! ### Default values
+//! FIFO_CONFIG_1:
+//! `fifo_stop_on_full = true`
+//!
+//! FIFO_CONFIG_2:
+//! `fifo_subsampling = 0x02`
+//!
+//! ### Examples
+//! ```rust,no_run
+//! # use crate::bmp390_rs::{Bmp390, Bmp390Result};
+//! # use crate::bmp390_rs::bus::Bus;
+//! # async fn demo<B: Bus>(mut device: Bmp390<B>)
+//! #     -> Bmp390Result<(), B::Error> {
+//! use bmp390_rs::register::fifo_config::{FifoConfig1, FifoConfig2};
+//!
+//! // Enable FIFO with pressure measurements
+//! let mut cfg = device.read::<FifoConfig1>().await?;
+//! cfg.fifo_mode = true;
+//! cfg.fifo_press_en = true;
+//! device.write::<FifoConfig1>(&cfg).await?;
+//!
+//! // Set a different downsampling level
+//! let mut cfg = device.read::<FifoConfig2>().await?;
+//! cfg.fifo_subsampling = 0x0A;
+//! device.write::<FifoConfig2>(&cfg).await?;
+//!
+//! # Ok(()) }
+//! ```
+//!
+//! See also: [`crate::Bmp390::fifo_configuration()`] and [`crate::Bmp390::set_fifo_configuration()`]
+
 use crate::register::{InvalidRegisterField, Readable, Reg, Writable};
 
+/// Marker type for FIFO_CONFIG_1 (0x17) register
+///
+/// - **Length:** 1 byte
+/// - **Access:** Read/Write
+///
+/// Used with [`Bmp390::read::<FifoConfig1>()`] or [`Bmp390::write::<FifoConfig1>()`]
 pub struct FifoConfig1;
 impl Reg for FifoConfig1 { const ADDR: u8 = 0x17; }
 
+/// The payload for the FIFO_CONFIG_1 (0x17) register.
 #[derive(Copy, Clone, Debug)]
 pub struct FifoConfig1Fields {
+    /// Enables or disables writing measurements to FIFO.
+    ///
+    /// If the FIFO is disabled, no measurements will be stored. It is however still possible to read from the FIFO.
     pub fifo_mode: bool,
+
+    /// Determines the behavior when there are new frames and the FIFO is full.
+    ///
+    /// If true, no frames will be written to FIFO if it is full. If false, the oldest frame will be overwritten.
     pub fifo_stop_on_full: bool,
+
+    /// Determines whether sensor timestamps should be appended to the last frame of the FIFO. (i.e., when the FIFO is fully drained)
     pub fifo_time_en: bool,
+
+    /// Should pressure frames be written to the FIFO?
     pub fifo_press_en: bool,
+
+    /// Should temperature frames be written to the FIFO?
     pub fifo_temp_en: bool,
 }
 impl Readable for FifoConfig1 {
@@ -40,19 +95,34 @@ impl Writable for FifoConfig1 {
     }
 }
 
+/// Marker type for FIFO_CONFIG_2 (0x18) register
+///
+/// - **Length:** 1 byte
+/// - **Access:** Read/Write
+///
+/// Used with [`Bmp390::read::<FifoConfig2>()`] or [`Bmp390::write::<FifoConfig2>()`]
 pub struct FifoConfig2;
 impl Reg for FifoConfig2 { const ADDR: u8 = 0x18; }
 
+/// The payload for the FIFO_CONFIG_2 (0x18) register.
 #[derive(Copy, Clone, Debug)]
 pub struct FifoConfig2Fields {
+    /// Downsampling of pressure and temperature data.
+    /// The factor is 2^fifo_subsampling, where fifo_subsampling is clamped between 0-7.
     pub fifo_subsampling: u8,
+
+    /// Data source for the pressure and temperature data.
     pub data_select: FifoDataSource,
 }
 
+/// Specifies the available data sources for pressure and temperature.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum FifoDataSource {
+    /// Unfiltered data
     Unfiltered = 0,
+    /// Filtered data
     Filtered = 1,
+    /// Reserved.
     Reserved = 2,
 }
 

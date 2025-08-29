@@ -1,10 +1,40 @@
+//! ### CONFIG - IIR filter configuration (`0x1F`, 1 byte, R/W)
+//!
+//! Controls the IIR filter coefficients.
+//!
+//! ### Default values
+//! 0x00 (Bypass mode / No filter)
+//!
+//! ### Examples
+//! ```rust,no_run
+//! # use crate::bmp390_rs::{Bmp390, Bmp390Result};
+//! # use crate::bmp390_rs::bus::Bus;
+//! # async fn demo<B: Bus>(mut device: Bmp390<B>)
+//! #     -> Bmp390Result<(), B::Error> {
+//! use bmp390_rs::register::config::{Config, ConfigFields, IIRFilterCoefficient};
+//!
+//! // Print current IIR filter coefficient
+//! let data = device.read::<Config>().await?;
+//! println!("{:?}", data.iir_filter);
+//! 
+//! // Write new coefficient:
+//! device.write::<Config>(&ConfigFields { iir_filter: IIRFilterCoefficient::Coef3 }).await?;
+//!
+//! # Ok(()) }
+//! ```
+
 use crate::register::{InvalidRegisterField, Readable, Reg, Writable};
 
+/// Marker type for CONFIG (0x1F) register
 pub struct Config;
 impl Reg for Config { const ADDR: u8 = 0x1F; }
 
+/// The payload for the CONFIG (0x1F) register.
 #[derive(Copy, Clone, Debug)]
 pub struct ConfigFields {
+    /// The IIR filter coefficient.
+    ///
+    /// Read more about the IIR filter in the datasheet section 3.4.3
     pub iir_filter: IIRFilterCoefficient
 }
 
@@ -27,15 +57,24 @@ impl Writable for Config {
     }
 }
 
+/// This enum holds all configurable IIR filter coefficients.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum IIRFilterCoefficient {
+    /// Filter coefficient is 0 => bypass-mode
     Coef0   = 0b000,
+    /// Filter coefficient is 1
     Coef1   = 0b001,
+    /// Filter coefficient is 3
     Coef3   = 0b010,
+    /// Filter coefficient is 7
     Coef7   = 0b011,
+    /// Filter coefficient is 15
     Coef15  = 0b100,
+    /// Filter coefficient is 31
     Coef31  = 0b101,
+    /// Filter coefficient is 63
     Coef63  = 0b110,
+    /// Filter coefficient is 127
     Coef127 = 0b111,
 }
 

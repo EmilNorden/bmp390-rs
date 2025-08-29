@@ -1,9 +1,8 @@
+//! This module provides Fakes to be used in unit tests.
+
 use crate::bus::{Bus, MAX_REG_BYTES};
-use crate::config::Configuration;
 use crate::error::Bmp390Error;
 use crate::register::{Readable, Writable};
-use crate::Bmp390;
-use embassy_time::Delay;
 use embedded_hal_async::delay::DelayNs;
 use heapless::LinearMap;
 
@@ -12,11 +11,16 @@ enum RegisterValue {
     Data {bytes: [u8; MAX_REG_BYTES], len: usize },
     DontCare
 }
+
+/// A fake bus implementation used by unit tests.
+///
+/// It provides functionality to inject register values to ease testing.
 pub struct FakeBus<const N: usize> {
     regs: LinearMap<(u8, usize), RegisterValue, N>,
     scratch: [u8; MAX_REG_BYTES],
 }
 
+/// A fake delay implementation used by unit tests
 pub struct FakeDelay{}
 
 impl DelayNs for FakeDelay {
@@ -26,6 +30,8 @@ impl DelayNs for FakeDelay {
 }
 
 impl<const N: usize> FakeBus<N> {
+
+    /// Creates a new instance of [`FakeBus`]
     pub fn new() -> Self {
         FakeBus {
             regs: LinearMap::new(),
@@ -33,12 +39,17 @@ impl<const N: usize> FakeBus<N> {
         }
     }
 
+    /// Make the [`FakeBus`] respond with the given data when reading the given register.
     pub fn with_response<R: Readable>(&mut self, data: &[u8]){
         let mut register_value = [0u8; MAX_REG_BYTES];
         register_value[..data.len()].copy_from_slice(data);
         self.regs.insert((R::ADDR, R::N), RegisterValue::Data { bytes: register_value, len: data.len()}).unwrap();
     }
 
+    /// Make the [`FakeBus`] respond with garbage data for the given register.
+    ///
+    /// This method is suitable if you dont want the [`FakeBus`] to panic,
+    /// but you are confident that the contents of the register does not matter for your test case
     pub fn with_any_response<R: Readable>(&mut self) {
         self.regs.insert((R::ADDR, R::N), RegisterValue::DontCare).unwrap();
     }

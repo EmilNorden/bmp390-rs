@@ -28,6 +28,7 @@ pub struct Bmp390<B> {
     max_measurement_time_us: u32,
 }
 
+/// Type alias used to simplify return types throughout the driver
 pub type Bmp390Result<T, BusError> = Result<T, Bmp390Error<BusError>>;
 
 impl<T> Bmp390I2c<T>
@@ -38,7 +39,7 @@ where
     /// Constructs a new Bmp390 driver instance with a given configuration that communicates over I2C
     ///
     /// This function will:
-    /// - Probe device for successful communication
+    /// - Probe for a connected BMP390 device.
     /// - Apply the given configuration
     /// - Load calibration coefficients from NVM
     ///
@@ -78,7 +79,7 @@ where
     /// Constructs a new Bmp390 driver instance with a given configuration that communicates over SPI
     ///
     /// This function will:
-    /// - Probe device for successful communication
+    /// - Probe for a connected BMP390 device.
     /// - Apply the given configuration
     /// - Load calibration coefficients from NVM
     ///
@@ -285,6 +286,7 @@ where
         Ok(self.bus.write::<W>(v).await?)
     }
 
+    /// Determines if the BMP390 device is connected by attempting to read the [`ChipId`] (0x00) register.
     pub async fn is_connected(&mut self) -> Bmp390Result<bool, B::Error> {
         let id = self.bus.read::<chip_id::ChipId>().await?;
 
@@ -675,6 +677,7 @@ impl Interrupts {
     const FIFO_WATERMARK: u8 = 1 << 1;
     const DATA_READY: u8 = 1 << 2;
 
+    /// Creates a new instance with no interrupts chosen.
     pub fn new() -> Self {
         Self(0)
     }

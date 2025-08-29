@@ -1,17 +1,26 @@
+//! This module contains traits and implementations to abstract away the I2C or SPI implementations to let the driver only care about
+//! which registers it wants to read or write.
 use crate::error::Bmp390Error;
 use crate::register::{Readable, Writable};
 
 pub(crate) const MAX_REG_BYTES:usize = 22;
 
+/// Abstraction for the underlying bus (I2C/SPI) that provides high-level methods for reading and writing registers.
 pub trait Bus {
+    /// The underlying bus error type.
     type Error;
-    
+
+    /// Call with a register marker type that implements [`Readable`] to read its value from the bus.
+    ///
+    /// This will read [`R::N`] bytes from the bus and uses [`Readable::decode`] to produce an object of type [`R::Out`]
     fn read<R: Readable>(&mut self) -> impl Future<Output = Result<R::Out, Bmp390Error<Self::Error>>>;
 
+    /// Writes [`W::In`] to register address [`W::ADDR`] by calling its [`Writable::encode`] implementation on the given value and writing the resulting [`[u8]`] slice to the bus.
     fn write<W: Writable>(&mut self, v: &W::In) -> impl Future<Output = Result<(), Bmp390Error<Self::Error>>>;
     
 }
 
+/// Wrapper for the `embedded_hal_async::i2c::I2c` that implements the [`Bus`] trait
 pub struct I2c<I2cType> {
     i2c: I2cType,
     address: u8,
@@ -52,6 +61,7 @@ where
     }
 }
 
+/// Wrapper for the `embedded_hal_async::spi::SpiDevice` that implements the [`Bus`] trait
 pub struct Spi<SpiType> {
     spi: SpiType,
     scratch: [u8; MAX_REG_BYTES + 1], // BMP390 send 1 initial dummy byte in responses, so account for that.

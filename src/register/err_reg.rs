@@ -1,3 +1,29 @@
+//! ### ERR_REG - Error conditions (`0x02`, 1 byte, R)
+//!
+//! Contains any detected error conditions.
+//!
+//! **Note:** The ERR_REG register has clear-on-read semantics.
+//!
+//! ### Default values
+//! 0x00 (No errors)
+//!
+//! ### Examples
+//! ```rust,no_run
+//! # use crate::bmp390_rs::{Bmp390, Bmp390Result};
+//! # use crate::bmp390_rs::bus::Bus;
+//! # async fn demo<B: Bus>(mut device: Bmp390<B>)
+//! #     -> Bmp390Result<(), B::Error> {
+//! use bmp390_rs::register::err_reg::ErrReg;
+//!
+//! // Check for fatal error
+//! let error = device.read::<ErrReg>().await?;
+//! if error.fatal_err {
+//!     println!("Oh no!");
+//! }
+//!
+//! # Ok(()) }
+//! ```
+
 use crate::register::{InvalidRegisterField, Readable, Reg};
 
 /// Marker struct for the ERR_REG (0x02) register
@@ -7,9 +33,12 @@ use crate::register::{InvalidRegisterField, Readable, Reg};
 ///
 /// Used with [`Bmp390::read::<ErrReg>()`] or the convenience method
 /// [`Bmp390::error_flags`].
+///
+/// Note that this register has **clear-on-read** semantics.
 pub struct ErrReg;
 impl Reg for ErrReg {  const ADDR:u8 = 0x02; }
 
+/// The payload for the ERR_REG (0x02) register.
 #[derive(Copy, Clone, Debug)]
 pub struct ErrorFlags {
     /// A fatal error occurred.

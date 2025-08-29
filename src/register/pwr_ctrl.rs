@@ -1,12 +1,43 @@
+//! ### PWR_CTRL - Oversampling configuration (`0x1B`, 1 byte, R/W)
+//!
+//! Configures power modes and enables/disables pressure and temperature sensors.
+//!
+//! ### Default values
+//! 0x00 (Pressure and temperature sensors disabled. Power Mode = Sleep)
+//!
+//! ### Examples
+//! ```rust,no_run
+//! # use crate::bmp390_rs::{Bmp390, Bmp390Result};
+//! # use crate::bmp390_rs::bus::Bus;
+//! # async fn demo<B: Bus>(mut device: Bmp390<B>)
+//! #     -> Bmp390Result<(), B::Error> {
+//! use bmp390_rs::register::pwr_ctrl::{PwrCtrl, PwrCtrlCfg, PowerMode};
+//!
+//! // Enables pressure sensor and put device in Normal mode.
+//! device.write::<PwrCtrl>(&PwrCtrlCfg { press_en: true, temp_en: false, mode: PowerMode::Normal }).await?;
+//!
+//! # Ok(()) }
+//! ```
+
 use crate::register::{InvalidRegisterField, Readable, Reg, Writable};
 
+/// Marker type for PWR_CTRL (0x1B) register
+///
+/// - **Length:** 1 byte
+/// - **Access:** Read/Write
+///
+/// Used with [`Bmp390::read::<PwrCtrl>()`] or [`Bmp390::write::<PwrCtrl>()`]
 pub struct PwrCtrl;
 impl Reg for PwrCtrl { const ADDR:u8 = 0x1B; }
 
+/// The payload for the PwrCtrl (0x1B) register.
 #[derive(Copy, Clone, Debug)]
 pub struct PwrCtrlCfg {
+    /// Pressor sensor enabled/disabled.
     pub press_en: bool, 
+    /// Temperature sensor enabled/disabled.
     pub temp_en: bool,
+    /// The power mode of the device.
     pub mode: PowerMode,
 }
 
@@ -44,11 +75,18 @@ impl Writable for PwrCtrl {
 /// For more information, see section 3.3 in the datasheet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PowerMode {
-    /// Sleep mode. This is the default mode after power on reset.
+    /// Sleep mode.
+    ///
+    /// This is the default mode after power on reset.
+    /// It is also this mode that the device returns to immediately after performing a measurement in [`Forced`] mode.
     Sleep,
-    /// Forced mode. In this mode, a single measurement is performed after which the device returns to Sleep mode.
+    /// Forced mode.
+    ///
+    /// In this mode, a single measurement is performed after which the device returns to Sleep mode.
     Forced,
-    // Normal mode. In this mode, measurements are constantly performed at the rate set in the odr_sel register
+    /// Normal mode.
+    ///
+    /// In this mode, measurements are constantly performed at the rate set in the odr_sel register
     Normal,
 }
 

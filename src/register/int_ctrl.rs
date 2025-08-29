@@ -1,16 +1,67 @@
+//! ### INT_CTRL - Interrupt control (`0x19`, 1 byte, R/W)
+//!
+//! Configures interrupts, the INT pin, and `INT_STATUS` register.
+//!
+//! ### Default values
+//! 0x02 (INT pin active high)
+//!
+//! ### Examples
+//! ```rust,no_run
+//! # use crate::bmp390_rs::{Bmp390, Bmp390Result};
+//! # use crate::bmp390_rs::bus::Bus;
+//! # async fn demo<B: Bus>(mut device: Bmp390<B>)
+//! #     -> Bmp390Result<(), B::Error> {
+//! use bmp390_rs::register::int_ctrl::{IntCtrl, IntCtrlCfg};
+//!
+//! // Write new interrupt configuration.
+//! device.write::<IntCtrl>(&IntCtrlCfg {
+//!     int_od: false,      // Keep INT pin push-pull
+//!     int_level: true,    // INT pin should be active HIGH
+//!     int_latch: false,   // Do not latch interrupts
+//!     fwtm_en: true,      // Enable FIFO watermark interrupt
+//!     ffull_en: true,     // Enable FIFO full
+//!     int_ds: false,      // Drive strength LOW
+//!     drdy_en: true       // Enable data ready interrupt
+//! }).await?;
+//!
+//! # Ok(()) }
+//! ```
 use crate::register::{InvalidRegisterField, Readable, Reg, Writable};
 
+/// Marker type for INT_CTRL (0x19) register
+///
+/// - **Length:** 1 byte
+/// - **Access:** Read/Write
+///
+/// Used with [`Bmp390::read::<IntCtrl>()`] or [`Bmp390::write::<IntCtrl>()`]
 pub struct IntCtrl;
 impl Reg for IntCtrl { const ADDR: u8 = 0x19; }
 
+/// The payload for the INT_CTRL (0x19) register.
 #[derive(Copy, Clone, Debug)]
 pub struct IntCtrlCfg {
+    /// True if INT pin is open-drain, false for push-pull.
     pub int_od: bool,
+    /// True if INT pin is active high, false for active low.
     pub int_level: bool,
+    /// True if interrupts for INT pin and INT_STATUS register should be latched.
     pub int_latch: bool,
+    /// Enable/disable FIFO watermark interrupt.
+    ///
+    /// This interrupt is asserted when the FIFO reaches a specific length. This length is configurable in the [`FifoWtm`] register.
     pub fwtm_en: bool,
+    /// Enable/disable FIFO full interrupt.
+    ///
+    /// This interrupt is asserted when the FIFO is full (FIFO length is >= 504).
     pub ffull_en: bool,
+    /// Drive strength of the INT pin (?)
+    ///
+    /// It is not clear from the datasheet what this field is. But some investigation suggests that it is drive strength for the INT pin.
+    /// The levels are not provided in the datasheet, but false is *low* drive strength and true is *high* drive strength.
     pub int_ds: bool,
+    /// Enable/disable data ready interrupt.
+    ///
+    /// This interrupt is asserted when a new measurement has been performed and stored in the data registers.
     pub drdy_en: bool,
 }
 

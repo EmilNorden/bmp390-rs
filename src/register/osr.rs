@@ -1,11 +1,45 @@
+//! ### OSR - Oversampling configuration (`0x1D`, 1 byte, R/W)
+//!
+//! Configures oversampling for pressure and temperature measurements.
+//!
+//! ### Default values
+//! 0x02 (x2 oversampling for pressure, no oversampling for temperature)
+//!
+//! ### Examples
+//! ```rust,no_run
+//! # use crate::bmp390_rs::{Bmp390, Bmp390Result};
+//! # use crate::bmp390_rs::bus::Bus;
+//! # async fn demo<B: Bus>(mut device: Bmp390<B>)
+//! #     -> Bmp390Result<(), B::Error> {
+//! use bmp390_rs::register::osr::{Osr, OsrCfg, Oversampling};
+//!
+//! // Get and print current oversampling settings
+//! let osr = device.read::<Osr>().await?;
+//! println!("Pressure oversampling {:?} Temperature oversampling: {:?}", osr.osr_p, osr.osr_t);
+//! 
+//! // Set maximum oversampling for both
+//! device.write::<Osr>(&OsrCfg { osr_p: Oversampling::X32, osr_t: Oversampling::X32 }).await?;
+//!
+//! # Ok(()) }
+//! ```
+
 use crate::register::{InvalidRegisterField, Readable, Reg, UnexpectedValue, Writable};
 
+/// Marker type for OSR (0x1C) register
+///
+/// - **Length:** 1 byte
+/// - **Access:** Read/Write
+///
+/// Used with [`Bmp390::read::<Osr>()`] or [`Bmp390::write::<Osr>()`]
 pub struct Osr;
 impl Reg for Osr { const ADDR:u8 = 0x1C; }
 
+/// The payload for the OSR (0x1C) register.
 #[derive(Copy, Clone, Debug)]
 pub struct OsrCfg {
+    /// Pressure oversampling
     pub osr_p: Oversampling,
+    /// Temperature oversampling
     pub osr_t: Oversampling,
 }
 
@@ -31,13 +65,20 @@ impl Writable for Osr {
     }
 }
 
+/// This enum contains all possible oversampling settings for temperature and pressure.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Oversampling {
+    /// No oversampling
     X1,
+    /// x2 oversampling
     X2,
+    /// x4 oversampling
     X4,
+    /// x8 oversampling
     X8,
+    /// x16 oversampling
     X16,
+    /// x32 oversampling
     X32,
 }
 
