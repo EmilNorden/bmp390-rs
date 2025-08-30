@@ -6,7 +6,6 @@ use crate::fifo::{
     ControlFrameType, FifoConfiguration, FifoFrame, FifoFullBehavior, FifoHeader, SensorFrameType,
 };
 use crate::register;
-use crate::register::calibration::{Calibration, CalibrationNvm};
 use crate::register::fifo_config::{
     FifoConfig1, FifoConfig1Fields, FifoConfig2, FifoConfig2Fields, FifoDataSource,
 };
@@ -15,7 +14,7 @@ use crate::register::fifo_length::FifoLength;
 use crate::register::int_ctrl::IntCtrl;
 use crate::register::osr::{Osr, OsrCfg, Oversampling};
 use crate::register::{
-    Readable, Writable, chip_id, cmd, data, err_reg, int_status, odr, osr, pwr_ctrl, status,
+    chip_id, cmd, data, err_reg, int_status, odr, osr, pwr_ctrl, status, Readable, Writable,
 };
 use embedded_hal::i2c::SevenBitAddress;
 use embedded_hal_async::delay::DelayNs;
@@ -47,6 +46,7 @@ where
     ///
     /// This function will:
     /// - Probe for a connected BMP390 device.
+    /// - Perform a soft reset if `reset` == [`ResetPolicy::Soft`]
     /// - Apply the given configuration
     /// - Load calibration coefficients from NVM
     ///
@@ -56,7 +56,7 @@ where
     /// # use embedded_hal_async::delay::DelayNs;
     /// # use embedded_hal_async::i2c::I2c;
     /// # use bmp390_rs::Bmp390Result;
-    ///  use bmp390_rs::{Bmp390, SdoPinState};
+    ///  use bmp390_rs::{Bmp390, SdoPinState, ResetPolicy};
     ///  use bmp390_rs::config::Configuration;
     /// # async fn demo<I: I2c, D: DelayNs>(i2c: I, mut delay: D) -> Bmp390Result<(), I::Error> {
     ///
@@ -64,6 +64,7 @@ where
     ///     i2c,
     ///     SdoPinState::High,
     ///     Configuration::default(),
+    ///     ResetPolicy::Soft,
     ///     &mut delay
     ///  ).await?;
     /// # Ok(())
@@ -72,9 +73,10 @@ where
         i2c: T,
         sdo_pin_state: SdoPinState,
         config: Configuration,
+        reset: ResetPolicy,
         delay: &mut D,
     ) -> Bmp390Result<Self, <I2c<T> as Bus>::Error> {
-        Self::new(I2c::new(i2c, sdo_pin_state.into()), config, delay).await
+        Self::new(I2c::new(i2c, sdo_pin_state.into()), config, reset, delay).await
     }
 }
 
@@ -87,6 +89,7 @@ where
     ///
     /// This function will:
     /// - Probe for a connected BMP390 device.
+    /// - Perform a soft reset if `reset` == [`ResetPolicy::Soft`]
     /// - Apply the given configuration
     /// - Load calibration coefficients from NVM
     ///
@@ -96,13 +99,14 @@ where
     /// # use embedded_hal_async::delay::DelayNs;
     /// # use embedded_hal_async::spi::SpiDevice;
     /// # use bmp390_rs::Bmp390Result;
-    ///  use bmp390_rs::Bmp390;
+    ///  use bmp390_rs::{Bmp390, ResetPolicy};
     ///  use bmp390_rs::config::Configuration;
     /// # async fn demo<S: SpiDevice, D: DelayNs>(spi: S, mut delay: D) -> Bmp390Result<(), S::Error> {
     ///
     ///  let device = Bmp390::new_spi(
     ///     spi,
     ///     Configuration::default(),
+    ///     ResetPolicy::Soft,
     ///     &mut delay
     ///  ).await?;
     /// # Ok(())
@@ -110,9 +114,10 @@ where
     pub async fn new_spi<D: DelayNs>(
         spi: T,
         config: Configuration,
+        reset: ResetPolicy,
         delay: &mut D,
     ) -> Bmp390Result<Self, <Spi<T> as Bus>::Error> {
-        Self::new(Spi::new(spi), config, delay).await
+        Self::new(Spi::new(spi), config, reset, delay).await
     }
 }
 
@@ -145,6 +150,7 @@ where
     pub(crate) async fn new<D: DelayNs>(
         mut bus: B,
         config: Configuration,
+        reset: ResetPolicy,
         delay: &mut D,
     ) -> Bmp390Result<Self, B::Error> {
         // The datasheet (Section 1, table 2) specifies 2ms start-up time after VDD/VDDIO > 1.8V
@@ -152,30 +158,7 @@ where
 
         let calibration_data = CalibrationData::new(&mut bus).await?;
 
-        bus.write::<pwr_ctrl::PwrCtrl>(&pwr_ctrl::PwrCtrlCfg {
-            press_en: config.enable_pressure,
-            temp_en: config.enable_temperature,
-            mode: config.mode,
-        })
-        .await?;
-
-        bus.write::<osr::Osr>(&osr::OsrCfg {
-            osr_p: config.pressure_oversampling,
-            osr_t: config.temperature_oversampling,
-        })
-        .await?;
-
-        bus.write::<odr::Odr>(&odr::OdrCfg {
-            odr_sel: config.output_data_rate,
-        })
-        .await?;
-
-        bus.write::<register::config::Config>(&register::config::ConfigFields {
-            iir_filter: config.iir_filter_coefficient,
-        })
-        .await?;
-
-        Ok(Bmp390 {
+        let mut device = Bmp390 {
             bus,
             calibration_data,
             max_measurement_time_us: calculate_maximum_measurement_time(
@@ -184,7 +167,43 @@ where
                 config.pressure_oversampling,
                 config.temperature_oversampling,
             ),
+        };
+
+        if reset == ResetPolicy::Soft {
+            device.soft_reset().await?;
+        }
+
+        device.apply_configuration(&config).await?;
+
+        Ok(device)
+    }
+
+    /// Applies the given configurations by writing to their corresponding registers.
+    pub async fn apply_configuration(&mut self, config: &Configuration) -> Bmp390Result<(), B::Error> {
+        self.bus.write::<pwr_ctrl::PwrCtrl>(&pwr_ctrl::PwrCtrlCfg {
+            press_en: config.enable_pressure,
+            temp_en: config.enable_temperature,
+            mode: config.mode,
         })
+            .await?;
+
+        self.bus.write::<osr::Osr>(&osr::OsrCfg {
+            osr_p: config.pressure_oversampling,
+            osr_t: config.temperature_oversampling,
+        })
+            .await?;
+
+        self.bus.write::<odr::Odr>(&odr::OdrCfg {
+            odr_sel: config.output_data_rate,
+        })
+            .await?;
+
+        self.bus.write::<register::config::Config>(&register::config::ConfigFields {
+            iir_filter: config.iir_filter_coefficient,
+        })
+            .await?;
+
+        Ok(())
     }
 
     /// Read a register (or fixed-size register block) using a **typed marker**.
@@ -291,7 +310,7 @@ where
     pub async fn write<W: Writable>(&mut self, v: &W::In) -> Bmp390Result<(), B::Error> {
         Ok(self.bus.write::<W>(v).await?)
     }
-    
+
     /// Determines if the BMP390 device is connected by attempting to read the [`ChipId`] (0x00) register.
     pub async fn is_connected(&mut self) -> Bmp390Result<bool, B::Error> {
         let id = self.bus.read::<chip_id::ChipId>().await?;
@@ -299,14 +318,41 @@ where
         Ok(id == BMP390_CHIP_ID)
     }
 
+    /// Returns true if the command decoder is ready to accept a new command.
+    ///
+    /// This only applies to the `CMD` register commands [`FifoFlush`](cmd::CmdData::FifoFlush) and [`SoftReset`](cmd::CmdData::SoftReset)
+    pub async fn command_ready(&mut self) -> Bmp390Result<bool, B::Error> {
+        let status = self.read::<status::Status>().await?;
+
+        Ok(status.cmd_rdy)
+    }
+
+    async fn wait_command_ready(&mut self, max_polls: u8) -> Bmp390Result<(), B::Error> {
+        for _ in 0..max_polls {
+            if self.command_ready().await? { return Ok(()) }
+        }
+
+        Err(Bmp390Error::Timeout)
+    }
+
     /// Triggers a soft reset
     ///
     /// All user settings are reset to their default state.
     ///
+    /// Before issuing a soft reset command, this method will wait for the command decoder to accept new commands. Likewise, after the soft reset the method will wait for the command decoder to be ready again.
+    /// If these does not happen in a timely fashion, an error of type [`Bmp390Error::Timeout`] will be returned.
+    ///
     /// **Note:** This resets the chip to factory defaults, not to the configuration that was provided when constructing the driver.
-    pub async fn soft_reset<D: DelayNs>(&mut self, delay: &mut D) -> Bmp390Result<(), B::Error> {
+    pub async fn soft_reset(&mut self) -> Bmp390Result<(), B::Error> {
+        // Is command decoder ready to accept a new command? Poll it max 32 times (non-scientifically chosen number)
+        self.wait_command_ready(32).await?;
+
+        // Issue soft reset command
         self.write::<cmd::Cmd>(&cmd::CmdData::SoftReset).await?;
-        Self::probe_ready(&mut self.bus, delay, 5).await?;
+
+        // Wait until command decoder is idle again
+        self.wait_command_ready(32).await?;
+
         Ok(())
     }
 
@@ -749,6 +795,15 @@ pub struct Measurement {
     pub temperature: f32,
 }
 
+/// What to do at startup before applying [`Configuration`].
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ResetPolicy {
+    /// Issue CMD=0xB6 and wait for `STATUS.cmd_rdy` (recommended default).
+    Soft,
+    /// Don’t reset; leave the chip as-is (faster resume, preserves FIFO/IIR history).
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -766,7 +821,7 @@ mod tests {
         ]);
         bus.with_response::<Data>(&[0x92, 0x51, 0x65, 0x79, 0xCE, 0x83]);
 
-        let mut device = Bmp390::new(bus, Configuration::default(), &mut FakeDelay {})
+        let mut device = Bmp390::new(bus, Configuration::default(), ResetPolicy::None, &mut FakeDelay {})
             .await
             .unwrap();
 
@@ -783,7 +838,7 @@ mod tests {
         bus.with_response::<FifoData<1>>(&[0b1000_0000]);
         bus.with_response::<FifoData<2>>(&[0b1000_0000, 0]);
 
-        let mut device = Bmp390::new(bus, Configuration::default(), &mut FakeDelay {})
+        let mut device = Bmp390::new(bus, Configuration::default(), ResetPolicy::None,&mut FakeDelay {})
             .await
             .unwrap();
 
@@ -799,7 +854,7 @@ mod tests {
         bus.with_response::<FifoData<1>>(&[0b1010_0000]);
         bus.with_response::<FifoData<4>>(&[0b1010_0000, 0x78, 0x56, 0x34]);
 
-        let mut device = Bmp390::new(bus, Configuration::default(), &mut FakeDelay {})
+        let mut device = Bmp390::new(bus, Configuration::default(), ResetPolicy::None,&mut FakeDelay {})
             .await
             .unwrap();
 
@@ -818,7 +873,7 @@ mod tests {
         bus.with_response::<FifoData<1>>(&[0b1001_0000]);
         bus.with_response::<FifoData<4>>(&[0b1001_0000, 0x78, 0x56, 0x34]);
 
-        let mut device = Bmp390::new(bus, Configuration::default(), &mut FakeDelay {})
+        let mut device = Bmp390::new(bus, Configuration::default(), ResetPolicy::None, &mut FakeDelay {})
             .await
             .unwrap();
 
@@ -837,7 +892,7 @@ mod tests {
         bus.with_response::<FifoData<1>>(&[0b1000_0100]);
         bus.with_response::<FifoData<4>>(&[0b1000_0100, 0x78, 0x56, 0x34]);
 
-        let mut device = Bmp390::new(bus, Configuration::default(), &mut FakeDelay {})
+        let mut device = Bmp390::new(bus, Configuration::default(), ResetPolicy::None, &mut FakeDelay {})
             .await
             .unwrap();
 
@@ -856,7 +911,7 @@ mod tests {
         bus.with_response::<FifoData<1>>(&[0b1001_0100]);
         bus.with_response::<FifoData<7>>(&[0b1000_0100, 0x98, 0x76, 0x54, 0x32, 0x21, 0x10]);
 
-        let mut device = Bmp390::new(bus, Configuration::default(), &mut FakeDelay {})
+        let mut device = Bmp390::new(bus, Configuration::default(), ResetPolicy::None, &mut FakeDelay {})
             .await
             .unwrap();
 
@@ -878,7 +933,7 @@ mod tests {
         bus.with_response::<FifoData<1>>(&[0b0100_0100]);
         bus.with_response::<FifoData<2>>(&[0b0100_0100, 0xAB]);
 
-        let mut device = Bmp390::new(bus, Configuration::default(), &mut FakeDelay {})
+        let mut device = Bmp390::new(bus, Configuration::default(), ResetPolicy::None, &mut FakeDelay {})
             .await
             .unwrap();
 
@@ -897,7 +952,7 @@ mod tests {
         bus.with_response::<FifoData<1>>(&[0b0100_1000]);
         bus.with_response::<FifoData<2>>(&[0b0100_1000, 0xCD]);
 
-        let mut device = Bmp390::new(bus, Configuration::default(), &mut FakeDelay {})
+        let mut device = Bmp390::new(bus, Configuration::default(), ResetPolicy::None, &mut FakeDelay {})
             .await
             .unwrap();
 

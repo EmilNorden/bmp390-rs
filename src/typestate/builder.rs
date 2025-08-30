@@ -2,7 +2,7 @@ use core::marker::PhantomData;
 use embedded_hal::digital::InputPin;
 use embedded_hal_async::delay::DelayNs;
 use embedded_hal_async::digital::Wait;
-use crate::{Bmp390, Bmp390Result};
+use crate::{Bmp390, Bmp390Result, ResetPolicy};
 use crate::bmp390::SdoPinState;
 use crate::bus::{Bus, I2c, Spi};
 use crate::config::Configuration;
@@ -44,7 +44,7 @@ impl Bmp390Builder<NoMode, NoOutput, NoBus, NoPin> {
 /// Methods available on the Bmp390Builder when FIFO has not been enabled
 impl<Mode, Out, B, IntPin> Bmp390Builder<Mode, Out, B, IntPin, false> {
     /// Configures the resulting [`Bmp390Mode`] instance to be used with the on-board FIFO.
-    /// 
+    ///
     /// This will change how you interact with the [`Bmp390`] instance, enabling you to use it as a queue abstraction.
     pub fn use_fifo(self) -> Bmp390Builder<Mode, Out, B, IntPin, true> {
         Bmp390Builder {
@@ -212,15 +212,17 @@ Bmp390Builder<Normal, Out, B, IntPin, USE_FIFO>
     /// This will initialize the main driver struct and perform the same initialization as if you
     /// called [`Bmp390::new_spi`] or [`Bmp390::new_i2c`]:
     /// - Probe for a connected BMP390 device.
+    /// - Perform a soft reset if `reset` == [`ResetPolicy::Soft`]
     /// - Apply the given configuration
     /// - Load calibration coefficients from NVM
     pub async fn build<D: DelayNs>(
         self,
+        reset: ResetPolicy,
         mut delay: D,
     ) -> Bmp390Result<Bmp390Mode<Normal, Out, B, IntPin, D, USE_FIFO>, B::Error> {
         let bus = self.bus.unwrap();
         let config = Configuration::default().power_mode(PowerMode::Normal);
-        let device = Bmp390::new(bus, config, &mut delay).await?;
+        let device = Bmp390::new(bus, config, reset, &mut delay).await?;
 
         Ok(Bmp390Mode::<Normal, _, _, _, _, USE_FIFO>::new(device, self.int_pin, delay).await?)
     }
@@ -235,15 +237,17 @@ Bmp390Builder<Forced, Out, B, IntPin, USE_FIFO>
     /// This will initialize the main driver struct and perform the same initialization as if you
     /// called [`Bmp390::new_spi`] or [`Bmp390::new_i2c`]:
     /// - Probe for a connected BMP390 device.
+    /// - Perform a soft reset if `reset` == [`ResetPolicy::Soft`]
     /// - Apply the given configuration
     /// - Load calibration coefficients from NVM
     pub async fn build<D: DelayNs>(
         self,
+        reset: ResetPolicy,
         mut delay: D,
     ) -> Bmp390Result<Bmp390Mode<Forced, Out, B, IntPin, D, USE_FIFO>, B::Error> {
         let bus = self.bus.unwrap();
         let config = Configuration::default().power_mode(PowerMode::Sleep);
-        let device = Bmp390::new(bus, config, &mut delay).await?;
+        let device = Bmp390::new(bus, config, reset, &mut delay).await?;
 
         Ok(Bmp390Mode::<Forced, _, _, _, _, USE_FIFO>::new(device, self.int_pin, delay).await?)
     }

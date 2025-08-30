@@ -25,4 +25,7 @@ pub enum Bmp390Error<BusError> {
     ///
     /// Could possibly indicate a bug in the driver, or less likely, a faulty chip or interference.
     UnexpectedFifoData,
+    
+    /// A timeout occurred waiting for a process to complete.
+    Timeout,
 }
