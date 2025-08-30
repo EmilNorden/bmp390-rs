@@ -1,17 +1,24 @@
-use embedded_hal::i2c::SevenBitAddress;
-use embedded_hal_async::delay::DelayNs;
 use crate::bus::{Bus, I2c, Spi};
 use crate::calibration::CalibrationData;
 use crate::config::Configuration;
-use crate::register;
 use crate::error::Bmp390Error;
-use crate::fifo::{ControlFrameType, FifoConfiguration, FifoFrame, FifoFullBehavior, FifoHeader, SensorFrameType};
-use crate::register::{chip_id, cmd, data, err_reg, int_status, odr, osr, pwr_ctrl, status, Readable, Writable};
-use crate::register::fifo_config::{FifoConfig1, FifoConfig1Fields, FifoConfig2, FifoConfig2Fields, FifoDataSource};
+use crate::fifo::{
+    ControlFrameType, FifoConfiguration, FifoFrame, FifoFullBehavior, FifoHeader, SensorFrameType,
+};
+use crate::register;
+use crate::register::calibration::{Calibration, CalibrationNvm};
+use crate::register::fifo_config::{
+    FifoConfig1, FifoConfig1Fields, FifoConfig2, FifoConfig2Fields, FifoDataSource,
+};
 use crate::register::fifo_data::FifoData;
 use crate::register::fifo_length::FifoLength;
 use crate::register::int_ctrl::IntCtrl;
 use crate::register::osr::{Osr, OsrCfg, Oversampling};
+use crate::register::{
+    Readable, Writable, chip_id, cmd, data, err_reg, int_status, odr, osr, pwr_ctrl, status,
+};
+use embedded_hal::i2c::SevenBitAddress;
+use embedded_hal_async::delay::DelayNs;
 
 /// Type alias for a Bmp390 chip communicating over I2C
 type Bmp390I2c<T> = Bmp390<I2c<T>>;
@@ -121,7 +128,6 @@ where
         delay: &mut D,
         attempts: u32,
     ) -> Bmp390Result<(), B::Error> {
-
         for _ in 0..attempts {
             if let Ok(id) = bus.read::<register::chip_id::ChipId>().await {
                 if id == BMP390_CHIP_ID {
@@ -151,23 +157,23 @@ where
             temp_en: config.enable_temperature,
             mode: config.mode,
         })
-            .await?;
+        .await?;
 
         bus.write::<osr::Osr>(&osr::OsrCfg {
             osr_p: config.pressure_oversampling,
             osr_t: config.temperature_oversampling,
         })
-            .await?;
+        .await?;
 
         bus.write::<odr::Odr>(&odr::OdrCfg {
             odr_sel: config.output_data_rate,
         })
-            .await?;
+        .await?;
 
         bus.write::<register::config::Config>(&register::config::ConfigFields {
             iir_filter: config.iir_filter_coefficient,
         })
-            .await?;
+        .await?;
 
         Ok(Bmp390 {
             bus,
@@ -286,6 +292,10 @@ where
         Ok(self.bus.write::<W>(v).await?)
     }
 
+    pub async fn calib(&mut self) -> Bmp390Result<CalibrationNvm, B::Error> {
+        Ok(self.bus.read::<Calibration>().await?)
+    }
+
     /// Determines if the BMP390 device is connected by attempting to read the [`ChipId`] (0x00) register.
     pub async fn is_connected(&mut self) -> Bmp390Result<bool, B::Error> {
         let id = self.bus.read::<chip_id::ChipId>().await?;
@@ -333,7 +343,10 @@ where
     }
 
     /// Writes oversampling configuration to the OSR (0x1C) register.
-    pub async fn set_oversampling_config(&mut self, oversampling: &OsrCfg) -> Bmp390Result<(), B::Error> {
+    pub async fn set_oversampling_config(
+        &mut self,
+        oversampling: &OsrCfg,
+    ) -> Bmp390Result<(), B::Error> {
         Ok(self.bus.write::<Osr>(oversampling).await?)
     }
 
@@ -743,8 +756,29 @@ pub struct Measurement {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::register::data::Data;
     use crate::register::{calibration::Calibration, chip_id::ChipId};
     use crate::testing::{FakeBus, FakeDelay};
+
+    #[tokio::test]
+    async fn bmp390_read_sensor_data() {
+        let mut bus: FakeBus<10> = FakeBus::new();
+        bus.with_response::<ChipId>(&[96]);
+        bus.with_response::<Calibration>(&[
+            0x98, 0x6E, 0x13, 0x4D, 0xF9, 0xB0, 0x1B, 0xC0, 0x15, 0x06, 0x01, 0x92, 0x4A, 0xAE,
+            0x5D, 0x03, 0xFA, 0x08, 0x0F, 0x06, 0xF5,
+        ]);
+        bus.with_response::<Data>(&[0x92, 0x51, 0x65, 0x79, 0xCE, 0x83]);
+
+        let mut device = Bmp390::new(bus, Configuration::default(), &mut FakeDelay {})
+            .await
+            .unwrap();
+
+        let measurement = device.read_sensor_data().await.unwrap();
+        assert_eq!(100548.42, measurement.pressure);
+        assert_eq!(25.498167, measurement.temperature);
+    }
+
     #[tokio::test]
     async fn bmp390_read_empty_fifo_frame() {
         let mut bus: FakeBus<10> = FakeBus::new();
