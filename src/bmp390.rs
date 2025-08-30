@@ -12,13 +12,13 @@ use crate::register::fifo_config::{
 use crate::register::fifo_data::FifoData;
 use crate::register::fifo_length::FifoLength;
 use crate::register::int_ctrl::IntCtrl;
-use crate::register::osr::{Osr, OsrCfg, Oversampling};
 use crate::register::{
-    chip_id, cmd, data, err_reg, int_status, odr, osr, pwr_ctrl, status, Readable, Writable,
+    chip_id, cmd, data, err_reg, int_status, status, Readable, Writable,
 };
 use embedded_hal::i2c::SevenBitAddress;
 use embedded_hal_async::delay::DelayNs;
 use crate::register::config::{ConfigFields, IIRFilterCoefficient};
+use crate::register::odr::OutputDataRate;
 
 /// Type alias for a Bmp390 chip communicating over I2C
 type Bmp390I2c<T> = Bmp390<I2c<T>>;
@@ -183,20 +183,20 @@ where
 
     /// Applies the given configurations by writing to their corresponding registers.
     pub async fn apply_configuration(&mut self, config: &Configuration) -> Bmp390Result<(), B::Error> {
-        self.bus.write::<pwr_ctrl::PwrCtrl>(&pwr_ctrl::PwrCtrlCfg {
+        self.bus.write::<register::pwr_ctrl::PwrCtrl>(&register::pwr_ctrl::PwrCtrlCfg {
             press_en: config.enable_pressure,
             temp_en: config.enable_temperature,
             mode: config.mode,
         })
             .await?;
 
-        self.bus.write::<osr::Osr>(&osr::OsrCfg {
+        self.bus.write::<register::osr::Osr>(&register::osr::OsrCfg {
             osr_p: config.pressure_oversampling,
             osr_t: config.temperature_oversampling,
         })
             .await?;
 
-        self.bus.write::<odr::Odr>(&odr::OdrCfg {
+        self.bus.write::<register::odr::Odr>(&register::odr::OdrCfg {
             odr_sel: config.output_data_rate,
         })
             .await?;
@@ -209,17 +209,118 @@ where
         Ok(())
     }
 
+    /// Returns the current IIR filter coefficient.
+    pub async fn iir_filter_coefficient(&mut self) -> Bmp390Result<IIRFilterCoefficient, B::Error> {
+        let config = self.read::<register::config::Config>().await?;
+
+        Ok(config.iir_filter)
+    }
+
     /// Sets the IIR filter coefficient.
     ///
     /// To bypass the filter, use [`IIRFilterCoefficient::Coef0`]
     ///
     /// Read more about the IIR filter in the datasheet section 3.4.3
-    pub async fn set_iir_filter_coefficient(&mut self, coefficient: &IIRFilterCoefficient) -> Bmp390Result<(), B::Error> {
+    pub async fn set_iir_filter_coefficient(&mut self, coefficient: IIRFilterCoefficient) -> Bmp390Result<(), B::Error> {
         self.write::<register::config::Config>(&ConfigFields {
-            iir_filter: *coefficient
+            iir_filter: coefficient
         }).await?;
 
         Ok(())
+    }
+
+    /// Returns the current output data rate.
+    pub async fn output_data_rate(&mut self) -> Bmp390Result<OutputDataRate, B::Error> {
+        let odr = self.bus.read::<register::odr::Odr>().await?;
+        Ok(odr.odr_sel)
+    }
+
+    /// Sets the output data rate.
+    ///
+    /// For more information, see [`register::odr`].
+    pub async fn set_output_data_rate(&mut self, rate: OutputDataRate) -> Bmp390Result<(), B::Error> {
+        self.write::<register::odr::Odr>(&register::odr::OdrCfg {
+            odr_sel: rate,
+        }).await?;
+
+        Ok(())
+    }
+
+    /// Returns true if the pressure sensor is enabled.
+    pub async fn pressure_enabled(&mut self) -> Bmp390Result<bool, B::Error> {
+        let pwr_ctrl = self.read::<register::pwr_ctrl::PwrCtrl>().await?;
+        Ok(pwr_ctrl.press_en)
+    }
+
+    /// Enables or disables the pressure sensor.
+    pub async fn set_pressure_enabled(&mut self, enabled: bool) -> Bmp390Result<(), B::Error> {
+        let mut pwr_ctrl = self.read::<register::pwr_ctrl::PwrCtrl>().await?;
+        pwr_ctrl.press_en = enabled;
+        self.write::<register::pwr_ctrl::PwrCtrl>(&pwr_ctrl).await?;
+
+        Ok(())
+    }
+
+    /// Returns true if the temperature sensor is enabled.
+    pub async fn temperature_enabled(&mut self) -> Bmp390Result<bool, B::Error> {
+        let pwr_ctrl = self.read::<register::pwr_ctrl::PwrCtrl>().await?;
+        Ok(pwr_ctrl.temp_en)
+    }
+
+    /// Enables or disables the temperature sensor.
+    pub async fn set_temperature_enabled(&mut self, enabled: bool) -> Bmp390Result<(), B::Error> {
+        let mut pwr_ctrl = self.read::<register::pwr_ctrl::PwrCtrl>().await?;
+        pwr_ctrl.temp_en = enabled;
+        self.write::<register::pwr_ctrl::PwrCtrl>(&pwr_ctrl).await?;
+
+        Ok(())
+    }
+
+    /// Returns the oversampling configuration from the OSR (0x1C) register.
+    pub async fn oversampling(&mut self) -> Bmp390Result<register::osr::OsrCfg, B::Error> {
+        Ok(self.bus.read::<register::osr::Osr>().await?)
+    }
+
+    /// Writes oversampling configuration to the OSR (0x1C) register.
+    pub async fn set_oversampling(
+        &mut self,
+        oversampling: &register::osr::OsrCfg,
+    ) -> Bmp390Result<(), B::Error> {
+        Ok(self.bus.write::<register::osr::Osr>(oversampling).await?)
+    }
+
+    /// Sets the power mode of the device by writing to the PwrCtrl (0x1B) register
+    ///
+    /// As described in section 3.3.4 of the datasheet, these are the valid state transitions:
+    ///
+    /// Sleep => Normal
+    ///
+    /// Normal => Sleep
+    ///
+    /// Sleep => Forced => Sleep (Forced is a transient state and the device will return to Sleep when the measurement is finished)
+    ///
+    /// The device ignores any attempt to perform an invalid state transition.
+    ///
+    /// # Examples
+    ///
+    /// ```rust, no_run
+    /// # use bmp390_rs::{Bmp390, Bmp390Result};
+    /// # use bmp390_rs::bus::Bus;
+    ///
+    /// # async fn demo<B: Bus>(mut device: Bmp390<B>) -> Bmp390Result<(), B::Error> {
+    /// use bmp390_rs::register::pwr_ctrl::PowerMode;
+    ///
+    /// device.set_mode(PowerMode::Normal).await?;
+    /// # Ok(()) };
+    pub async fn set_mode(&mut self, mode: register::pwr_ctrl::PowerMode) -> Bmp390Result<(), B::Error> {
+        let mut pwr_ctrl = self.bus.read::<register::pwr_ctrl::PwrCtrl>().await?;
+        pwr_ctrl.mode = mode;
+        self.bus.write::<register::pwr_ctrl::PwrCtrl>(&pwr_ctrl).await?;
+        Ok(())
+    }
+    /// Reads the current power mode from the PwrCtrl (0x1B) register
+    pub async fn mode(&mut self) -> Bmp390Result<register::pwr_ctrl::PowerMode, B::Error> {
+        Ok(self.bus.read::<register::pwr_ctrl::PwrCtrl>().await?.mode)
     }
 
     /// Read a register (or fixed-size register block) using a **typed marker**.
@@ -407,19 +508,6 @@ where
         Ok(self.bus.read::<int_status::IntStatus>().await?)
     }
 
-    /// Returns the oversampling configuration from the OSR (0x1C) register.
-    pub async fn oversampling_config(&mut self) -> Bmp390Result<OsrCfg, B::Error> {
-        Ok(self.bus.read::<Osr>().await?)
-    }
-
-    /// Writes oversampling configuration to the OSR (0x1C) register.
-    pub async fn set_oversampling_config(
-        &mut self,
-        oversampling: &OsrCfg,
-    ) -> Bmp390Result<(), B::Error> {
-        Ok(self.bus.write::<Osr>(oversampling).await?)
-    }
-
     /// Returns the current FIFO configuration. This is a combination of the fields stored in registers FIFO_CONFIG_1 (0x17) and FIFO_CONFIG_2 (0x18).
     ///
     /// You could theoretically access the same information using [`Bmp390::read::<FifoConfig1>`] and [`Bmp390::read::<FifoConfig2>`].
@@ -601,40 +689,6 @@ where
         }
     }
 
-    /// Sets the power mode of the device by writing to the PwrCtrl (0x1B) register
-    ///
-    /// As described in section 3.3.4 of the datasheet, these are the valid state transitions:
-    ///
-    /// Sleep => Normal
-    ///
-    /// Normal => Sleep
-    ///
-    /// Sleep => Forced => Sleep (Forced is a transient state and the device will return to Sleep when the measurement is finished)
-    ///
-    /// The device ignores any attempt to perform an invalid state transition.
-    ///
-    /// # Examples
-    ///
-    /// ```rust, no_run
-    /// # use bmp390_rs::{Bmp390, Bmp390Result};
-    /// # use bmp390_rs::bus::Bus;
-    ///
-    /// # async fn demo<B: Bus>(mut device: Bmp390<B>) -> Bmp390Result<(), B::Error> {
-    /// use bmp390_rs::register::pwr_ctrl::PowerMode;
-    ///
-    /// device.set_mode(PowerMode::Normal).await?;
-    /// # Ok(()) };
-    pub async fn set_mode(&mut self, mode: pwr_ctrl::PowerMode) -> Bmp390Result<(), B::Error> {
-        let mut pwr_ctrl = self.bus.read::<pwr_ctrl::PwrCtrl>().await?;
-        pwr_ctrl.mode = mode;
-        self.bus.write::<pwr_ctrl::PwrCtrl>(&pwr_ctrl).await?;
-        Ok(())
-    }
-    /// Reads the current power mode from the PwrCtrl (0x1B) register
-    pub async fn mode(&mut self) -> Bmp390Result<pwr_ctrl::PowerMode, B::Error> {
-        Ok(self.bus.read::<pwr_ctrl::PwrCtrl>().await?.mode)
-    }
-
     /// Reads the latest **calibrated** pressure and temperature measurement stored in the Data (0x04 - 0x09) registers.
     ///
     /// This method will read data from these registers and calibrate them using the NVM-stored calibration coefficients.
@@ -722,8 +776,8 @@ where
 fn calculate_maximum_measurement_time(
     pressure_enabled: bool,
     temperature_enabled: bool,
-    pressure_oversampling: Oversampling,
-    temperature_oversampling: Oversampling,
+    pressure_oversampling: register::osr::Oversampling,
+    temperature_oversampling: register::osr::Oversampling,
 ) -> u32 {
     let osr_p: u8 = pressure_oversampling.into();
     let osr_t: u8 = temperature_oversampling.into();
@@ -997,8 +1051,8 @@ mod tests {
         let time = super::calculate_maximum_measurement_time(
             true,
             true,
-            Oversampling::X1,
-            Oversampling::X1,
+            register::osr::Oversampling::X1,
+            register::osr::Oversampling::X1,
         );
 
         assert!(time > 5700);
@@ -1006,8 +1060,8 @@ mod tests {
         let time = super::calculate_maximum_measurement_time(
             true,
             true,
-            Oversampling::X2,
-            Oversampling::X1,
+            register::osr::Oversampling::X2,
+            register::osr::Oversampling::X1,
         );
 
         assert!(time > 7960);
@@ -1015,8 +1069,8 @@ mod tests {
         let time = super::calculate_maximum_measurement_time(
             true,
             true,
-            Oversampling::X4,
-            Oversampling::X1,
+            register::osr::Oversampling::X4,
+            register::osr::Oversampling::X1,
         );
 
         assert!(time > 12480);
@@ -1024,8 +1078,8 @@ mod tests {
         let time = super::calculate_maximum_measurement_time(
             true,
             true,
-            Oversampling::X8,
-            Oversampling::X1,
+            register::osr::Oversampling::X8,
+            register::osr::Oversampling::X1,
         );
 
         assert!(time > 21530);
@@ -1033,8 +1087,8 @@ mod tests {
         let time = super::calculate_maximum_measurement_time(
             true,
             true,
-            Oversampling::X16,
-            Oversampling::X2,
+            register::osr::Oversampling::X16,
+            register::osr::Oversampling::X2,
         );
 
         assert!(time > 41890);
@@ -1042,8 +1096,8 @@ mod tests {
         let time = super::calculate_maximum_measurement_time(
             true,
             true,
-            Oversampling::X32,
-            Oversampling::X2,
+            register::osr::Oversampling::X32,
+            register::osr::Oversampling::X2,
         );
 
         assert!(time > 78090);
