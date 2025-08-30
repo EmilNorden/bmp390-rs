@@ -20,6 +20,25 @@ pub struct CalibrationData {
 }
 
 impl CalibrationData {
+    pub fn empty() -> Self {
+        Self {
+            par_t1: 0.0,
+            par_t2: 0.0,
+            par_t3: 0.0,
+            par_p1: 0.0,
+            par_p2: 0.0,
+            par_p3: 0.0,
+            par_p4: 0.0,
+            par_p5: 0.0,
+            par_p6: 0.0,
+            par_p7: 0.0,
+            par_p8: 0.0,
+            par_p9: 0.0,
+            par_p10: 0.0,
+            par_p11: 0.0,
+            t_lin: 0.0,
+        }
+    }
     pub async fn new<B: Bus>(bus: &mut B) -> Bmp390Result<Self, B::Error> {
         let calib_coeffs = bus.read::<register::calibration::Calibration>().await?;
 

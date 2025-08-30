@@ -156,11 +156,9 @@ where
         // The datasheet (Section 1, table 2) specifies 2ms start-up time after VDD/VDDIO > 1.8V
         Self::probe_ready(&mut bus, delay, 5).await?;
 
-        let calibration_data = CalibrationData::new(&mut bus).await?;
-
         let mut device = Bmp390 {
             bus,
-            calibration_data,
+            calibration_data: CalibrationData::empty(),
             max_measurement_time_us: calculate_maximum_measurement_time(
                 config.enable_pressure,
                 config.enable_temperature,
@@ -173,10 +171,14 @@ where
             device.soft_reset().await?;
         }
 
+        device.calibration_data = CalibrationData::new(&mut device.bus).await?;
+
         device.apply_configuration(&config).await?;
 
         Ok(device)
     }
+
+
 
     /// Applies the given configurations by writing to their corresponding registers.
     pub async fn apply_configuration(&mut self, config: &Configuration) -> Bmp390Result<(), B::Error> {
@@ -347,13 +349,25 @@ where
         // Is command decoder ready to accept a new command? Poll it max 32 times (non-scientifically chosen number)
         self.wait_command_ready(32).await?;
 
+        // Read EVENT register to clear 'por_detected' flag.
+        let _ = self.read::<register::event::Event>().await?;
+
         // Issue soft reset command
         self.write::<cmd::Cmd>(&cmd::CmdData::SoftReset).await?;
 
-        // Wait until command decoder is idle again
-        self.wait_command_ready(32).await?;
+        // Wait for por_detected flag to be set
+        self.wait_power_on_reset_detected(32).await?;
 
         Ok(())
+    }
+
+    async fn wait_power_on_reset_detected(&mut self, max_polls: u8) -> Bmp390Result<(), B::Error> {
+        for _ in 0..max_polls {
+            let event = self.read::<register::event::Event>().await?;
+            if event.por_detected { return Ok(())}
+        }
+
+        Err(Bmp390Error::Timeout)
     }
 
     /// Returns the error flags from the ERR_REG (0x02) register.
