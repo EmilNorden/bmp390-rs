@@ -164,8 +164,8 @@ impl<Mode, Out: OutputConfig, B: Bus, IntPin: Wait + InputPin, Delay: DelayNs, c
 }
 
 /// FIFO related functionality that is common for both Normal and Forced mode
-impl<Mode, Out, B: Bus, IntPin: Wait + InputPin, Delay: DelayNs, const USE_FIFO: bool>
-Bmp390Mode<Mode, Out, B, IntPin, Delay, USE_FIFO>
+impl<Mode, Out, B: Bus, IntPin: Wait + InputPin, Delay: DelayNs>
+Bmp390Mode<Mode, Out, B, IntPin, Delay, true>
 {
     /*pub async fn options(&mut self) -> TypeStateResult<FifoDeviceOptions, B::Error, IntPin::Error> {
         Ok(FifoDeviceOptions::from(self.device.fifo_configuration().await.map_err(TypeStateError::Device)?))
