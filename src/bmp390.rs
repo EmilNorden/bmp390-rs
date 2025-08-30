@@ -125,10 +125,10 @@ impl<B> Bmp390<B>
 where
     B: Bus,
 {
-    /// Probes if the device is ready by attempting to read ChipId [`attempts`] times with a 1 ms delay.
+    /// Probes if the device is connected by attempting to read ChipId [`attempts`] times with a 1 ms delay.
     ///
     /// Returns [`Bmp390Error::NotConnected`] if no response is received.
-    async fn probe_ready<D: DelayNs>(
+    async fn probe_connected<D: DelayNs>(
         bus: &mut B,
         delay: &mut D,
         attempts: u32,
@@ -154,7 +154,7 @@ where
         delay: &mut D,
     ) -> Bmp390Result<Self, B::Error> {
         // The datasheet (Section 1, table 2) specifies 2ms start-up time after VDD/VDDIO > 1.8V
-        Self::probe_ready(&mut bus, delay, 5).await?;
+        Self::probe_connected(&mut bus, delay, 5).await?;
 
         let mut device = Bmp390 {
             bus,
