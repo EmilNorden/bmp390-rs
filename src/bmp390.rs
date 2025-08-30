@@ -291,11 +291,7 @@ where
     pub async fn write<W: Writable>(&mut self, v: &W::In) -> Bmp390Result<(), B::Error> {
         Ok(self.bus.write::<W>(v).await?)
     }
-
-    pub async fn calib(&mut self) -> Bmp390Result<CalibrationNvm, B::Error> {
-        Ok(self.bus.read::<Calibration>().await?)
-    }
-
+    
     /// Determines if the BMP390 device is connected by attempting to read the [`ChipId`] (0x00) register.
     pub async fn is_connected(&mut self) -> Bmp390Result<bool, B::Error> {
         let id = self.bus.read::<chip_id::ChipId>().await?;
