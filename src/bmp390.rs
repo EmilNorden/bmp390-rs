@@ -339,12 +339,12 @@ where
 
     /// Triggers a soft reset
     ///
-    /// All user settings are reset to their default state.
+    /// All user settings are reset to their default state[^1]
     ///
-    /// Before issuing a soft reset command, this method will wait for the command decoder to accept new commands. Likewise, after the soft reset the method will wait for the command decoder to be ready again.
-    /// If these does not happen in a timely fashion, an error of type [`Bmp390Error::Timeout`] will be returned.
+    /// Before issuing a soft reset command, this method will wait for the command decoder to accept new commands. After the soft reset the method will wait for the `por_detected` flag in the `EVENT` register to be set..
+    /// If these events do not happen in a timely fashion, an error of type [`Bmp390Error::Timeout`] will be returned.
     ///
-    /// **Note:** This resets the chip to factory defaults, not to the configuration that was provided when constructing the driver.
+    /// [`1] This resets the chip to factory defaults, not to the configuration that was provided when constructing the driver.
     pub async fn soft_reset(&mut self) -> Bmp390Result<(), B::Error> {
         // Is command decoder ready to accept a new command? Poll it max 32 times (non-scientifically chosen number)
         self.wait_command_ready(32).await?;
