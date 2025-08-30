@@ -18,6 +18,7 @@ use crate::register::{
 };
 use embedded_hal::i2c::SevenBitAddress;
 use embedded_hal_async::delay::DelayNs;
+use crate::register::config::{ConfigFields, IIRFilterCoefficient};
 
 /// Type alias for a Bmp390 chip communicating over I2C
 type Bmp390I2c<T> = Bmp390<I2c<T>>;
@@ -204,6 +205,19 @@ where
             iir_filter: config.iir_filter_coefficient,
         })
             .await?;
+
+        Ok(())
+    }
+
+    /// Sets the IIR filter coefficient.
+    ///
+    /// To bypass the filter, use [`IIRFilterCoefficient::Coef0`]
+    ///
+    /// Read more about the IIR filter in the datasheet section 3.4.3
+    pub async fn set_iir_filter_coefficient(&mut self, coefficient: &IIRFilterCoefficient) -> Bmp390Result<(), B::Error> {
+        self.write::<register::config::Config>(&ConfigFields {
+            iir_filter: *coefficient
+        }).await?;
 
         Ok(())
     }
