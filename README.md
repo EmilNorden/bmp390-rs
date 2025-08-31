@@ -1,5 +1,7 @@
 # Rust BMP390 driver
-
+[![Github Actions](https://img.shields.io/github/actions/workflow/status/EmilNorden/bmp390-rs/rust.yml?branch=main)](https://github.com/EmilNorden/bmp390-rs/actions)
+[![Crates.io](https://img.shields.io/crates/l/bmp390-rs.svg)](https://crates.io/crates/bmp390-rs)
+[![Documentation](https://img.shields.io/badge/documentation-docs.rs-blue.svg)](https://docs.rs/bmp390-rs)
 
 This crate provides a platform-agnostic async driver for the Bosch BMP390 pressure (and temperature!) sensor using the [`embedded-hal-async`](https://github.com/rust-embedded/embedded-hal) traits.
 
