@@ -14,12 +14,13 @@ Feedback or contributions to this crate is highly welcome.
 - Ergonomic high-level API (no register twiddling needed, unless you want to)
 - Strongly-typed register access via `read::<regs::...>()` / `write::<regs::...>()` for those who cant stay away.
 - FIFO support.
+- Optional [uom](https://crates.io/crates/uom) support through the `uom` feature.
 
 ### Roadmap
 - Stabilize the public API (typestate vs. ergonomic helpers).
 - Add blocking API (embedded-hal) alongside async.
-- Increasing developer ergonomics.
-- Documentation.
+- Examples.
+- Improve documentation.
 
 # Device
 The Bosch BMP390 is a pressure sensor with an accuracy of ±3 Pascal, equivalent to 0.25m altitude.
@@ -32,13 +33,13 @@ Add this crate as a dependency in your `Cargo.toml`:
 
 ```toml
 [dependencies]
-bmp390-rs = "0.3"
+bmp390-rs = "0.4"
 ```
 
 
 ## Pick your interface
 This driver provides *two* different interfaces: The *core* interface and the *typestate* interface
-### Core (register-level)
+### Core interface
 Direct, typed access to the chip’s registers—plus ergonomic helpers. Great when you want full control.
 
 ```rust
@@ -61,7 +62,7 @@ device.write::<register::odr::Odr>(&register::odr::OdrCfg {
 
 ```
 
-### Typestate
+### Typestate interface
 Higher-level wrapper that encodes BMP390 modes in the type system.
 ```rust
 use bmp390_rs::typestate::Bmp390Builder;
@@ -96,7 +97,7 @@ let mut device = Bmp390Builder::new()
         .build(delay).await?;
 
 // Now you can ask the Bmp390 device to perform measurements and put them in the on-board FIFO..
-device.enqueue_measurement().await.unwrap();
+device.enqueue_measurement().await?
 
 // And read from the FIFO at a later point:
 match forced_device.dequeue().await? {
@@ -105,6 +106,11 @@ match forced_device.dequeue().await? {
     FifoOutput::Empty => {},
 }
 ```
+## Features
+`bmp390-rs` has the following `Cargo` features:
+- `uom` -- Enables integration with the [uom](https://crates.io/crates/uom) crate, which allows you call `into_uom` on any `Measurement`.
+  
+
 
 ## License
 
