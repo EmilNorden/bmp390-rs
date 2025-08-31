@@ -723,7 +723,7 @@ where
     ///
     /// # async fn demo<B: Bus>(mut device: Bmp390<B>) -> Bmp390Result<(), B::Error> {
     /// let data = device.read_sensor_data().await?;
-    /// println!("The current pressure and temperature is {} and {}", data.pressure, data.temperature);
+    /// println!("The current pressure and temperature is {} and {}", data.pressure(), data.temperature());
     /// # Ok(()) };
     pub async fn read_sensor_data(&mut self) -> Bmp390Result<Measurement<f32, f32>, B::Error> {
         let sample = self.bus.read::<data::Data>().await?;
