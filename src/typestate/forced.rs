@@ -47,7 +47,7 @@ Bmp390Mode<Forced, Out, B, IntPin, Delay, false>
     /// The returned [`Measurement`] type will only provide you with the data you configured the device to return using the [`Bmp390Builder::enable_pressure`] and [`Bmp390Builder::enable_temperature`] methods.
     pub async fn read_measurement(
         &mut self,
-    ) -> TypeStateResult<Measurement<Out>, B::Error, IntPin::Error> {
+    ) -> TypeStateResult<Measurement<f32, f32,Out>, B::Error, IntPin::Error> {
         self.device
             .set_mode(PowerMode::Forced)
             .await
