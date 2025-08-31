@@ -113,7 +113,7 @@ impl<Mode, Out: OutputConfig, B: Bus, IntPin: Wait + InputPin, Delay: DelayNs, c
                             .read_sensor_data()
                             .await
                             .map_err(TypeStateError::Device)?;
-                        return Ok(Measurement::new(data.temperature, data.pressure));
+                        return Ok(Measurement::new(data.temperature(), data.pressure()));
                     }
                 }
 
@@ -132,7 +132,7 @@ impl<Mode, Out: OutputConfig, B: Bus, IntPin: Wait + InputPin, Delay: DelayNs, c
                 .read_sensor_data()
                 .await
                 .map_err(TypeStateError::Device)?;
-            Ok(Measurement::new(data.temperature, data.pressure))
+            Ok(Measurement::new(data.temperature(), data.pressure()))
         }
     }
 

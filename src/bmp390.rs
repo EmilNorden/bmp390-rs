@@ -707,7 +707,7 @@ where
     /// let data = device.read_sensor_data().await?;
     /// println!("The current pressure and temperature is {} and {}", data.pressure, data.temperature);
     /// # Ok(()) };
-    pub async fn read_sensor_data(&mut self) -> Bmp390Result<Measurement, B::Error> {
+    pub async fn read_sensor_data(&mut self) -> Bmp390Result<Measurement<f32, f32>, B::Error> {
         let sample = self.bus.read::<data::Data>().await?;
 
         let compensated_temperature = self
@@ -872,9 +872,31 @@ impl Interrupts {
 
 /// Holds calibrated pressure and temperature samples.
 #[derive(Copy, Clone, Debug)]
-pub struct Measurement {
-    pub pressure: f32,
-    pub temperature: f32,
+pub struct Measurement<TPress, TTemp> {
+    pressure: TPress,
+    temperature: TTemp,
+}
+
+impl<TPress: Copy, TTemp: Copy> Measurement<TPress, TTemp> {
+    pub fn pressure(&self) -> TPress {
+        self.pressure
+    }
+
+    pub fn temperature(&self) -> TTemp {
+        self.temperature
+    }
+}
+
+#[cfg(feature = "uom")]
+impl Measurement<f32, f32> {
+    pub fn into_uom(self) -> Measurement<uom::si::f32::Pressure, uom::si::f32::ThermodynamicTemperature> {
+        use uom::si::thermodynamic_temperature::{ThermodynamicTemperature, degree_celsius};
+        use uom::si::pressure::{Pressure, pascal};
+        Measurement::new(
+            ThermodynamicTemperature::new::<degree_celsius>(self.temperature),
+            Pressure::new::<pascal>(self.pressure)
+        )
+    }
 }
 
 /// What to do at startup before applying [`Configuration`].

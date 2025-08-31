@@ -52,7 +52,7 @@ Bmp390Mode<Normal, Out, B, IntPin, Delay, false>
     pub async fn read_latest_measurement(&mut self) -> Bmp390Result<Measurement<f32, f32, Out>, B::Error> {
         let data = self.device.read_sensor_data().await?;
 
-        Ok(Measurement::new(data.temperature, data.pressure))
+        Ok(Measurement::new(data.temperature(), data.pressure()))
     }
 
     /// Reads the next measurement from the device.
