@@ -98,7 +98,7 @@ impl<Mode, Out: OutputConfig, B: Bus, IntPin: Wait + InputPin, Delay: DelayNs, c
     /// This method will prioritize using interrupts, and will fall back to Waiting the maximum measurement time if no interrupt pin as been configured.
     async fn wait_for_data(
         &mut self,
-    ) -> TypeStateResult<Measurement<Out>, B::Error, IntPin::Error> {
+    ) -> TypeStateResult<Measurement<f32, f32, Out>, B::Error, IntPin::Error> {
         if let Some(int_pin) = &mut self.int_pin {
             loop {
                 while int_pin.is_high().map_err(TypeStateError::Pin)? {
@@ -236,7 +236,7 @@ Bmp390Mode<Mode, Out, B, IntPin, Delay, true>
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum FifoOutput<Out> {
     /// Sensor measurement frame. The [`Measurement´] type that this enum variant holds is generic over the output configured when creating the [`Bmp390Mode`].
-    Measurement(Measurement<Out>),
+    Measurement(Measurement<f32, f32, Out>),
     /// Sensor time frame. This frame is produced when there are no more frames in the FIFO and sensor time is enabled.
     SensorTime(u32),
     /// Empty FIFO frame. This frame is produced when there are no more frames in the FIFO and sensor time is not enabled.

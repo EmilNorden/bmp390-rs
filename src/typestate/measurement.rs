@@ -3,93 +3,77 @@ use core::fmt::{Debug, Formatter};
 use core::marker::PhantomData;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub struct Measurement<Out> {
-    temperature_c: f32,
-    pressure_pa: f32,
+pub struct Measurement<TPress, TTemp, Out> {
+    temperature: TTemp,
+    pressure: TPress,
     _phantom: PhantomData<Out>,
 }
 
-impl<Out> Measurement<Out> {
-    pub fn new(temperature_c: f32, pressure_pa: f32) -> Self {
+impl<TPress: Copy, TTemp: Copy, Out> Measurement<TPress, TTemp, Out> {
+    pub fn new(temperature_c: TTemp, pressure_pa: TPress) -> Self {
         Self {
-            temperature_c,
-            pressure_pa,
+            temperature: temperature_c,
+            pressure: pressure_pa,
             _phantom: PhantomData,
         }
     }
 }
 
-impl Measurement<Pressure> {
-    pub fn pressure_pascal(&self) -> f32 {
-        self.pressure_pa
+impl<TPress: Copy, TTemp: Copy> Measurement<TPress, TTemp, Pressure> {
+    pub fn pressure_pascal(&self) -> TPress {
+        self.pressure
     }
 }
 
-impl Debug for Measurement<Pressure> {
+impl<TPress: Copy + Debug, TTemp: Copy + Debug> Debug for Measurement<TPress, TTemp, Pressure> {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Measurement")
-            .field("pressure_pa", &self.pressure_pa)
+            .field("pressure_pa", &self.pressure)
             .finish()
     }
 }
 
-impl Measurement<Temperature> {
-    pub fn temperature_celsius(&self) -> f32 {
-        self.temperature_c
+impl<TPress: Copy, TTemp: Copy> Measurement<TPress, TTemp, Temperature> {
+    pub fn temperature_celsius(&self) -> TTemp {
+        self.temperature
     }
 }
 
-impl Debug for Measurement<Temperature> {
+impl<TPress: Copy + Debug, TTemp: Copy + Debug> Debug for Measurement<TPress, TTemp, Temperature> {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Sample")
-            .field("temperature_c", &self.temperature_c)
+            .field("temperature_c", &self.temperature)
             .finish()
     }
 }
 
-impl Measurement<PressureAndTemperature> {
-    pub fn pressure_pascal(&self) -> f32 {
-        self.pressure_pa
+impl<TPress: Copy, TTemp: Copy> Measurement<TPress, TTemp, PressureAndTemperature> {
+    pub fn pressure_pascal(&self) -> TPress {
+        self.pressure
     }
 
-    pub fn temperature_celsius(&self) -> f32 {
-        self.temperature_c
+    pub fn temperature_celsius(&self) -> TTemp {
+        self.temperature
     }
 }
 
-impl Debug for Measurement<PressureAndTemperature> {
+impl<TPress: Copy + Debug, TTemp: Copy + Debug> Debug for Measurement<TPress, TTemp, PressureAndTemperature> {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Sample")
-            .field("pressure_pa", &self.pressure_pa)
-            .field("temperature_c", &self.temperature_c)
+            .field("pressure_pa", &self.pressure)
+            .field("temperature_c", &self.temperature)
             .finish()
     }
 }
 
 #[cfg(feature = "uom")]
-impl Measurement<Pressure> {
-    pub fn pressure_uom(&self) -> uom::si::f32::Pressure {
-        uom::si::pressure::Pressure::new::<uom::si::pressure::pascal>(self.pressure_pa)
-    }
-}
-#[cfg(feature = "uom")]
-impl Measurement<Temperature> {
-    pub fn temperature_uom(&self) -> uom::si::f32::ThermodynamicTemperature {
-        uom::si::thermodynamic_temperature::ThermodynamicTemperature::new::<
-            uom::si::thermodynamic_temperature::degree_celsius,
-        >(self.temperature_c)
-    }
-}
-
-#[cfg(feature = "uom")]
-impl Measurement<PressureAndTemperature> {
-    pub fn pressure_uom(&self) -> uom::si::f32::Pressure {
-        uom::si::pressure::Pressure::new::<uom::si::pressure::pascal>(self.pressure_pa)
-    }
-
-    pub fn temperature_uom(&self) -> uom::si::f32::ThermodynamicTemperature {
-        uom::si::thermodynamic_temperature::ThermodynamicTemperature::new::<
-            uom::si::thermodynamic_temperature::degree_celsius,
-        >(self.temperature_c)
+impl<Out> Measurement<f32, f32, Out> {
+    pub fn into_uom(self) -> Measurement<uom::si::f32::Pressure, uom::si::f32::ThermodynamicTemperature, Out> {
+        use uom::si::thermodynamic_temperature::{ThermodynamicTemperature, degree_celsius};
+        use uom::si::pressure::{Pressure, pascal};
+        Measurement::new(
+            ThermodynamicTemperature::new::<degree_celsius>(self.temperature),
+            Pressure::new::<pascal>(self.pressure)
+        )
     }
 }

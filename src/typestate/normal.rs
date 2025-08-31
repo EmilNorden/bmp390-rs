@@ -49,7 +49,7 @@ Bmp390Mode<Normal, Out, B, IntPin, Delay, false>
     ///
     /// This method will not synchronize data readout with the configured measurement rate, so if you're calling
     /// this method faster than the device measurement rate, you will read the same data multiple times.
-    pub async fn read_latest_measurement(&mut self) -> Bmp390Result<Measurement<Out>, B::Error> {
+    pub async fn read_latest_measurement(&mut self) -> Bmp390Result<Measurement<f32, f32, Out>, B::Error> {
         let data = self.device.read_sensor_data().await?;
 
         Ok(Measurement::new(data.temperature, data.pressure))
@@ -62,7 +62,7 @@ Bmp390Mode<Normal, Out, B, IntPin, Delay, false>
     /// maximum measurement time as described by the datasheet section 3.9 before reading the data.
     pub async fn read_next_measurement(
         &mut self,
-    ) -> TypeStateResult<Measurement<Out>, B::Error, IntPin::Error> {
+    ) -> TypeStateResult<Measurement<f32, f32, Out>, B::Error, IntPin::Error> {
         Ok(self.wait_for_data().await?)
     }
 }
