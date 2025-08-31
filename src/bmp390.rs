@@ -6,19 +6,17 @@ use crate::fifo::{
     ControlFrameType, FifoConfiguration, FifoFrame, FifoFullBehavior, FifoHeader, SensorFrameType,
 };
 use crate::register;
+use crate::register::config::{ConfigFields, IIRFilterCoefficient};
 use crate::register::fifo_config::{
     FifoConfig1, FifoConfig1Fields, FifoConfig2, FifoConfig2Fields, FifoDataSource,
 };
 use crate::register::fifo_data::FifoData;
 use crate::register::fifo_length::FifoLength;
 use crate::register::int_ctrl::IntCtrl;
-use crate::register::{
-    chip_id, cmd, data, err_reg, int_status, status, Readable, Writable,
-};
+use crate::register::odr::OutputDataRate;
+use crate::register::{Readable, Writable, chip_id, cmd, data, err_reg, int_status, status};
 use embedded_hal::i2c::SevenBitAddress;
 use embedded_hal_async::delay::DelayNs;
-use crate::register::config::{ConfigFields, IIRFilterCoefficient};
-use crate::register::odr::OutputDataRate;
 
 /// Type alias for a Bmp390 chip communicating over I2C
 type Bmp390I2c<T> = Bmp390<I2c<T>>;
@@ -179,31 +177,36 @@ where
         Ok(device)
     }
 
-
-
     /// Applies the given configurations by writing to their corresponding registers.
-    pub async fn apply_configuration(&mut self, config: &Configuration) -> Bmp390Result<(), B::Error> {
-        self.bus.write::<register::pwr_ctrl::PwrCtrl>(&register::pwr_ctrl::PwrCtrlCfg {
-            press_en: config.enable_pressure,
-            temp_en: config.enable_temperature,
-            mode: config.mode,
-        })
+    pub async fn apply_configuration(
+        &mut self,
+        config: &Configuration,
+    ) -> Bmp390Result<(), B::Error> {
+        self.bus
+            .write::<register::pwr_ctrl::PwrCtrl>(&register::pwr_ctrl::PwrCtrlCfg {
+                press_en: config.enable_pressure,
+                temp_en: config.enable_temperature,
+                mode: config.mode,
+            })
             .await?;
 
-        self.bus.write::<register::osr::Osr>(&register::osr::OsrCfg {
-            osr_p: config.pressure_oversampling,
-            osr_t: config.temperature_oversampling,
-        })
+        self.bus
+            .write::<register::osr::Osr>(&register::osr::OsrCfg {
+                osr_p: config.pressure_oversampling,
+                osr_t: config.temperature_oversampling,
+            })
             .await?;
 
-        self.bus.write::<register::odr::Odr>(&register::odr::OdrCfg {
-            odr_sel: config.output_data_rate,
-        })
+        self.bus
+            .write::<register::odr::Odr>(&register::odr::OdrCfg {
+                odr_sel: config.output_data_rate,
+            })
             .await?;
 
-        self.bus.write::<register::config::Config>(&register::config::ConfigFields {
-            iir_filter: config.iir_filter_coefficient,
-        })
+        self.bus
+            .write::<register::config::Config>(&register::config::ConfigFields {
+                iir_filter: config.iir_filter_coefficient,
+            })
             .await?;
 
         Ok(())
@@ -221,10 +224,14 @@ where
     /// To bypass the filter, use [`IIRFilterCoefficient::Coef0`]
     ///
     /// Read more about the IIR filter in the datasheet section 3.4.3
-    pub async fn set_iir_filter_coefficient(&mut self, coefficient: IIRFilterCoefficient) -> Bmp390Result<(), B::Error> {
+    pub async fn set_iir_filter_coefficient(
+        &mut self,
+        coefficient: IIRFilterCoefficient,
+    ) -> Bmp390Result<(), B::Error> {
         self.write::<register::config::Config>(&ConfigFields {
-            iir_filter: coefficient
-        }).await?;
+            iir_filter: coefficient,
+        })
+        .await?;
 
         Ok(())
     }
@@ -238,10 +245,12 @@ where
     /// Sets the output data rate.
     ///
     /// For more information, see [`register::odr`].
-    pub async fn set_output_data_rate(&mut self, rate: OutputDataRate) -> Bmp390Result<(), B::Error> {
-        self.write::<register::odr::Odr>(&register::odr::OdrCfg {
-            odr_sel: rate,
-        }).await?;
+    pub async fn set_output_data_rate(
+        &mut self,
+        rate: OutputDataRate,
+    ) -> Bmp390Result<(), B::Error> {
+        self.write::<register::odr::Odr>(&register::odr::OdrCfg { odr_sel: rate })
+            .await?;
 
         Ok(())
     }
@@ -312,10 +321,15 @@ where
     ///
     /// device.set_mode(PowerMode::Normal).await?;
     /// # Ok(()) };
-    pub async fn set_mode(&mut self, mode: register::pwr_ctrl::PowerMode) -> Bmp390Result<(), B::Error> {
+    pub async fn set_mode(
+        &mut self,
+        mode: register::pwr_ctrl::PowerMode,
+    ) -> Bmp390Result<(), B::Error> {
         let mut pwr_ctrl = self.bus.read::<register::pwr_ctrl::PwrCtrl>().await?;
         pwr_ctrl.mode = mode;
-        self.bus.write::<register::pwr_ctrl::PwrCtrl>(&pwr_ctrl).await?;
+        self.bus
+            .write::<register::pwr_ctrl::PwrCtrl>(&pwr_ctrl)
+            .await?;
         Ok(())
     }
     /// Reads the current power mode from the PwrCtrl (0x1B) register
@@ -446,7 +460,9 @@ where
 
     async fn wait_command_ready(&mut self, max_polls: u8) -> Bmp390Result<(), B::Error> {
         for _ in 0..max_polls {
-            if self.command_ready().await? { return Ok(()) }
+            if self.command_ready().await? {
+                return Ok(());
+            }
         }
 
         Err(Bmp390Error::Timeout)
@@ -479,7 +495,9 @@ where
     async fn wait_power_on_reset_detected(&mut self, max_polls: u8) -> Bmp390Result<(), B::Error> {
         for _ in 0..max_polls {
             let event = self.read::<register::event::Event>().await?;
-            if event.por_detected { return Ok(())}
+            if event.por_detected {
+                return Ok(());
+            }
         }
 
         Err(Bmp390Error::Timeout)
@@ -889,13 +907,15 @@ impl<TPress: Copy, TTemp: Copy> Measurement<TPress, TTemp> {
 
 #[cfg(feature = "uom")]
 impl Measurement<f32, f32> {
-    pub fn into_uom(self) -> Measurement<uom::si::f32::Pressure, uom::si::f32::ThermodynamicTemperature> {
-        use uom::si::thermodynamic_temperature::{ThermodynamicTemperature, degree_celsius};
+    pub fn into_uom(
+        self,
+    ) -> Measurement<uom::si::f32::Pressure, uom::si::f32::ThermodynamicTemperature> {
         use uom::si::pressure::{Pressure, pascal};
-        Measurement::new(
-            ThermodynamicTemperature::new::<degree_celsius>(self.temperature),
-            Pressure::new::<pascal>(self.pressure)
-        )
+        use uom::si::thermodynamic_temperature::{ThermodynamicTemperature, degree_celsius};
+        Measurement {
+            temperature: ThermodynamicTemperature::new::<degree_celsius>(self.temperature),
+            pressure: Pressure::new::<pascal>(self.pressure),
+        }
     }
 }
 
@@ -905,7 +925,7 @@ pub enum ResetPolicy {
     /// Issue CMD=0xB6 and wait for `STATUS.cmd_rdy` (recommended default).
     Soft,
     /// Don’t reset; leave the chip as-is (faster resume, preserves FIFO/IIR history).
-    None
+    None,
 }
 
 #[cfg(test)]
@@ -925,9 +945,14 @@ mod tests {
         ]);
         bus.with_response::<Data>(&[0x92, 0x51, 0x65, 0x79, 0xCE, 0x83]);
 
-        let mut device = Bmp390::new(bus, Configuration::default(), ResetPolicy::None, &mut FakeDelay {})
-            .await
-            .unwrap();
+        let mut device = Bmp390::new(
+            bus,
+            Configuration::default(),
+            ResetPolicy::None,
+            &mut FakeDelay {},
+        )
+        .await
+        .unwrap();
 
         let measurement = device.read_sensor_data().await.unwrap();
         assert_eq!(100548.42, measurement.pressure);
@@ -942,9 +967,14 @@ mod tests {
         bus.with_response::<FifoData<1>>(&[0b1000_0000]);
         bus.with_response::<FifoData<2>>(&[0b1000_0000, 0]);
 
-        let mut device = Bmp390::new(bus, Configuration::default(), ResetPolicy::None,&mut FakeDelay {})
-            .await
-            .unwrap();
+        let mut device = Bmp390::new(
+            bus,
+            Configuration::default(),
+            ResetPolicy::None,
+            &mut FakeDelay {},
+        )
+        .await
+        .unwrap();
 
         let frame = device.read_fifo_frame().await.unwrap();
         assert_eq!(FifoFrame::SensorFrame(SensorFrameType::Empty), frame);
@@ -958,9 +988,14 @@ mod tests {
         bus.with_response::<FifoData<1>>(&[0b1010_0000]);
         bus.with_response::<FifoData<4>>(&[0b1010_0000, 0x78, 0x56, 0x34]);
 
-        let mut device = Bmp390::new(bus, Configuration::default(), ResetPolicy::None,&mut FakeDelay {})
-            .await
-            .unwrap();
+        let mut device = Bmp390::new(
+            bus,
+            Configuration::default(),
+            ResetPolicy::None,
+            &mut FakeDelay {},
+        )
+        .await
+        .unwrap();
 
         let frame = device.read_fifo_frame().await.unwrap();
         assert_eq!(
@@ -977,9 +1012,14 @@ mod tests {
         bus.with_response::<FifoData<1>>(&[0b1001_0000]);
         bus.with_response::<FifoData<4>>(&[0b1001_0000, 0x78, 0x56, 0x34]);
 
-        let mut device = Bmp390::new(bus, Configuration::default(), ResetPolicy::None, &mut FakeDelay {})
-            .await
-            .unwrap();
+        let mut device = Bmp390::new(
+            bus,
+            Configuration::default(),
+            ResetPolicy::None,
+            &mut FakeDelay {},
+        )
+        .await
+        .unwrap();
 
         let frame = device.read_fifo_frame().await.unwrap();
         assert_eq!(
@@ -996,9 +1036,14 @@ mod tests {
         bus.with_response::<FifoData<1>>(&[0b1000_0100]);
         bus.with_response::<FifoData<4>>(&[0b1000_0100, 0x78, 0x56, 0x34]);
 
-        let mut device = Bmp390::new(bus, Configuration::default(), ResetPolicy::None, &mut FakeDelay {})
-            .await
-            .unwrap();
+        let mut device = Bmp390::new(
+            bus,
+            Configuration::default(),
+            ResetPolicy::None,
+            &mut FakeDelay {},
+        )
+        .await
+        .unwrap();
 
         let frame = device.read_fifo_frame().await.unwrap();
         assert_eq!(
@@ -1015,9 +1060,14 @@ mod tests {
         bus.with_response::<FifoData<1>>(&[0b1001_0100]);
         bus.with_response::<FifoData<7>>(&[0b1000_0100, 0x98, 0x76, 0x54, 0x32, 0x21, 0x10]);
 
-        let mut device = Bmp390::new(bus, Configuration::default(), ResetPolicy::None, &mut FakeDelay {})
-            .await
-            .unwrap();
+        let mut device = Bmp390::new(
+            bus,
+            Configuration::default(),
+            ResetPolicy::None,
+            &mut FakeDelay {},
+        )
+        .await
+        .unwrap();
 
         let frame = device.read_fifo_frame().await.unwrap();
         assert_eq!(
@@ -1037,9 +1087,14 @@ mod tests {
         bus.with_response::<FifoData<1>>(&[0b0100_0100]);
         bus.with_response::<FifoData<2>>(&[0b0100_0100, 0xAB]);
 
-        let mut device = Bmp390::new(bus, Configuration::default(), ResetPolicy::None, &mut FakeDelay {})
-            .await
-            .unwrap();
+        let mut device = Bmp390::new(
+            bus,
+            Configuration::default(),
+            ResetPolicy::None,
+            &mut FakeDelay {},
+        )
+        .await
+        .unwrap();
 
         let frame = device.read_fifo_frame().await.unwrap();
         assert_eq!(
@@ -1056,9 +1111,14 @@ mod tests {
         bus.with_response::<FifoData<1>>(&[0b0100_1000]);
         bus.with_response::<FifoData<2>>(&[0b0100_1000, 0xCD]);
 
-        let mut device = Bmp390::new(bus, Configuration::default(), ResetPolicy::None, &mut FakeDelay {})
-            .await
-            .unwrap();
+        let mut device = Bmp390::new(
+            bus,
+            Configuration::default(),
+            ResetPolicy::None,
+            &mut FakeDelay {},
+        )
+        .await
+        .unwrap();
 
         let frame = device.read_fifo_frame().await.unwrap();
         assert_eq!(
