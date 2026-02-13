@@ -25,6 +25,7 @@ type Bmp390I2c<T> = Bmp390<I2c<T>>;
 type Bmp390Spi<T> = Bmp390<Spi<T>>;
 
 const BMP390_CHIP_ID: u8 = 0x60;
+const BMP388_CHIP_ID: u8 = 0x50;
 
 /// Main Bmp390 driver struct
 pub struct Bmp390<B> {
@@ -134,7 +135,7 @@ where
     ) -> Bmp390Result<(), B::Error> {
         for _ in 0..attempts {
             if let Ok(id) = bus.read::<register::chip_id::ChipId>().await {
-                if id == BMP390_CHIP_ID {
+                if id == BMP390_CHIP_ID || id == BMP388_CHIP_ID {
                     return Ok(());
                 }
             }
@@ -446,7 +447,7 @@ where
     pub async fn is_connected(&mut self) -> Bmp390Result<bool, B::Error> {
         let id = self.bus.read::<chip_id::ChipId>().await?;
 
-        Ok(id == BMP390_CHIP_ID)
+        Ok(id == BMP390_CHIP_ID || id == BMP388_CHIP_ID)
     }
 
     /// Returns true if the command decoder is ready to accept a new command.
