@@ -50,15 +50,29 @@ where
     }
 
     async fn write<W: Writable>(&mut self, v: &W::In) -> Result<(), Bmp390Error<Self::Error>> {
-        debug_assert!(W::N + 1 <= self.scratch.len());
-        let buf = &mut self.scratch[..W::N + 1];
-        buf[0] = W::ADDR;
-        W::encode(&v, &mut buf[1..W::N+1]);
+        let buf = address_data_pairs::<W>(v, &mut self.scratch);
 
         self.i2c.write(self.address, buf).await.map_err(Bmp390Error::Bus)?;
 
         Ok(())
     }
+}
+
+/// Encodes `v` as pairs of register address and data in `scratch`.
+///
+/// The BMP390 does not auto-increment the address on writes: both I2C and SPI writes are
+/// sequences of address/data pairs (datasheet sections 5.2.1 and 5.3.1). All register
+/// addresses are below 0x80, so the SPI R/W bit of each address byte is 0 (write).
+fn address_data_pairs<'a, W: Writable>(v: &W::In, scratch: &'a mut [u8]) -> &'a [u8] {
+    let mut data = [0u8; MAX_REG_BYTES];
+    W::encode(v, &mut data[..W::N]);
+
+    let buf = &mut scratch[..2 * W::N];
+    for (i, &byte) in data[..W::N].iter().enumerate() {
+        buf[2 * i] = W::ADDR + i as u8;
+        buf[2 * i + 1] = byte;
+    }
+    buf
 }
 
 /// Wrapper for the `embedded_hal_async::spi::SpiDevice` that implements the [`Bus`] trait
@@ -96,11 +110,7 @@ where
     }
 
     async fn write<W: Writable>(&mut self, v: &W::In) -> Result<(), Bmp390Error<Self::Error>> {
-        debug_assert!(W::N + 1 <= self.scratch.len());
-
-        let buf = &mut self.scratch[..W::N + 1];
-        buf[0] = W::ADDR & 0x7F; // MSB should be 0 for writes.
-        W::encode(&v, &mut buf[1..W::N+1]);
+        let buf = address_data_pairs::<W>(v, &mut self.scratch);
 
         self.spi.write(buf).await.map_err(Bmp390Error::Bus)?;
 

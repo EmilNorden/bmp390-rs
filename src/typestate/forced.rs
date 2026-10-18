@@ -7,7 +7,6 @@ use core::marker::PhantomData;
 use embedded_hal::digital::InputPin;
 use embedded_hal_async::delay::DelayNs;
 use embedded_hal_async::digital::Wait;
-use crate::bmp390::Interrupts;
 
 impl<Out: OutputConfig, B: Bus, IntPin: Wait + InputPin, Delay: DelayNs, const USE_FIFO: bool>
     Bmp390Mode<Forced, Out, B, IntPin, Delay, USE_FIFO>
@@ -19,9 +18,7 @@ impl<Out: OutputConfig, B: Bus, IntPin: Wait + InputPin, Delay: DelayNs, const U
     ) -> Bmp390Result<Bmp390Mode<Forced, Out, B, IntPin, Delay, USE_FIFO>, B::Error> {
         // If an interrupt pin is given, we want to setup the device to enable DRDY interrupts and disable FIFO interrupts.
         if int_pin.is_some() {
-            device
-                .mask_interrupts(Interrupts::new().fifo_full().fifo_watermark())
-                .await?;
+            Self::configure_interrupt_pin(&mut device).await?;
         }
 
         Self::configure(&mut device).await?;
@@ -32,6 +29,16 @@ impl<Out: OutputConfig, B: Bus, IntPin: Wait + InputPin, Delay: DelayNs, const U
             delay,
             _phantom_data: PhantomData,
         })
+    }
+
+    /// Starts a forced measurement.
+    ///
+    /// During a forced measurement the device ignores another forced mode command (datasheet
+    /// section 3.3.4), so this waits for the end of a measurement in progress first.
+    async fn trigger_measurement(&mut self) -> Bmp390Result<(), B::Error> {
+        self.device.wait_for_sleep(&mut self.delay, 0).await?;
+        self.discard_data_ready().await?;
+        self.device.set_mode(PowerMode::Forced).await
     }
 }
 
@@ -48,8 +55,7 @@ Bmp390Mode<Forced, Out, B, IntPin, Delay, false>
     pub async fn read_measurement(
         &mut self,
     ) -> TypeStateResult<Measurement<f32, f32,Out>, B::Error, IntPin::Error> {
-        self.device
-            .set_mode(PowerMode::Forced)
+        self.trigger_measurement()
             .await
             .map_err(TypeStateError::Device)?;
 
@@ -64,8 +70,7 @@ Bmp390Mode<Forced, Out, B, IntPin, Delay, true>
     ///
     /// The measurement can be read-out using the [`Bmp390Mode::dequeue()´] method.
     pub async fn enqueue_measurement(&mut self) -> TypeStateResult<(), B::Error, IntPin::Error> {
-        self.device
-            .set_mode(PowerMode::Forced)
+        self.trigger_measurement()
             .await
             .map_err(TypeStateError::Device)?;
 

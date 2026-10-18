@@ -1,12 +1,11 @@
 use crate::bus::Bus;
 use crate::typestate::measurement::Measurement;
-use crate::typestate::{Bmp390Mode, Normal, OutputConfig, TypeStateResult};
+use crate::typestate::{Bmp390Mode, Normal, OutputConfig, TypeStateError, TypeStateResult};
 use crate::{Bmp390, Bmp390Result};
 use core::marker::PhantomData;
 use embedded_hal::digital::InputPin;
 use embedded_hal_async::delay::DelayNs;
 use embedded_hal_async::digital::Wait;
-use crate::bmp390::Interrupts;
 
 impl<Out: OutputConfig, B: Bus, IntPin: Wait + InputPin, Delay: DelayNs, const USE_FIFO: bool>
     Bmp390Mode<Normal, Out, B, IntPin, Delay, USE_FIFO>
@@ -18,13 +17,11 @@ impl<Out: OutputConfig, B: Bus, IntPin: Wait + InputPin, Delay: DelayNs, const U
     ) -> Bmp390Result<Self, B::Error> {
         // If an interrupt pin is given, we want to setup the device to enable DRDY interrupts and disable FIFO interrupts.
         if int_pin.is_some() {
-            device
-                .mask_interrupts(Interrupts::new().fifo_full().fifo_watermark())
-                .await?;
+            Self::configure_interrupt_pin(&mut device).await?;
         }
 
         Self::configure(&mut device).await?;
-        
+
         Ok(Self {
             device,
             int_pin,
@@ -63,6 +60,9 @@ Bmp390Mode<Normal, Out, B, IntPin, Delay, false>
     pub async fn read_next_measurement(
         &mut self,
     ) -> TypeStateResult<Measurement<f32, f32, Out>, B::Error, IntPin::Error> {
+        self.discard_data_ready()
+            .await
+            .map_err(TypeStateError::Device)?;
         Ok(self.wait_for_data().await?)
     }
 }

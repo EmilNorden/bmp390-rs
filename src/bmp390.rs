@@ -31,7 +31,46 @@ const BMP388_CHIP_ID: u8 = 0x50;
 pub struct Bmp390<B> {
     bus: B,
     calibration_data: CalibrationData,
-    max_measurement_time_us: u32,
+    measurement: MeasurementSettings,
+}
+
+/// The settings that determine the measurement time, as last written by the driver
+#[derive(Copy, Clone)]
+struct MeasurementSettings {
+    press_en: bool,
+    temp_en: bool,
+    osr: register::osr::OsrCfg,
+}
+
+impl MeasurementSettings {
+    /// Reset values of PWR_CTRL and OSR (datasheet table 25)
+    const DEFAULT: Self = Self {
+        press_en: false,
+        temp_en: false,
+        osr: register::osr::OsrCfg {
+            osr_p: register::osr::Oversampling::X4,
+            osr_t: register::osr::Oversampling::X1,
+        },
+    };
+
+    /// The settings with the longest measurement
+    const LONGEST: Self = Self {
+        press_en: true,
+        temp_en: true,
+        osr: register::osr::OsrCfg {
+            osr_p: register::osr::Oversampling::X32,
+            osr_t: register::osr::Oversampling::X32,
+        },
+    };
+
+    fn max_measurement_time_us(&self) -> u32 {
+        calculate_maximum_measurement_time(
+            self.press_en,
+            self.temp_en,
+            self.osr.osr_p,
+            self.osr.osr_t,
+        )
+    }
 }
 
 /// Type alias used to simplify return types throughout the driver
@@ -159,44 +198,60 @@ where
         let mut device = Bmp390 {
             bus,
             calibration_data: CalibrationData::empty(),
-            max_measurement_time_us: calculate_maximum_measurement_time(
-                config.enable_pressure,
-                config.enable_temperature,
-                config.pressure_oversampling,
-                config.temperature_oversampling,
-            ),
+            measurement: MeasurementSettings::DEFAULT,
         };
 
         if reset == ResetPolicy::Soft {
-            device.soft_reset().await?;
+            device.soft_reset(delay).await?;
         }
 
         device.calibration_data = CalibrationData::new(&mut device.bus).await?;
 
-        device.apply_configuration(&config).await?;
+        device.apply_configuration(&config, delay).await?;
 
         Ok(device)
     }
 
     /// Applies the given configurations by writing to their corresponding registers.
-    pub async fn apply_configuration(
+    ///
+    /// The device is put to sleep before the configuration is written, and the power mode is
+    /// written last. This way, a normal mode cycle always starts with the new settings, and the
+    /// device never runs normal mode with a mix of old and new settings, which can be a
+    /// configuration error (`ERR_REG.conf_err`). If a measurement is in progress, the method
+    /// waits for its end, because the device delays a mode change until then and ignores
+    /// further mode changes in that time (datasheet section 3.3.4).
+    pub async fn apply_configuration<D: DelayNs>(
         &mut self,
         config: &Configuration,
+        delay: &mut D,
     ) -> Bmp390Result<(), B::Error> {
-        self.bus
-            .write::<register::pwr_ctrl::PwrCtrl>(&register::pwr_ctrl::PwrCtrlCfg {
-                press_en: config.enable_pressure,
-                temp_en: config.enable_temperature,
-                mode: config.mode,
-            })
-            .await?;
+        let pwr_ctrl = self.bus.read::<register::pwr_ctrl::PwrCtrl>().await?;
+        if pwr_ctrl.mode != register::pwr_ctrl::PowerMode::Sleep {
+            // The running measurement may use settings this driver did not write.
+            let running = MeasurementSettings {
+                press_en: pwr_ctrl.press_en,
+                temp_en: pwr_ctrl.temp_en,
+                osr: self.bus.read::<register::osr::Osr>().await?,
+            };
+            self.bus
+                .write::<register::pwr_ctrl::PwrCtrl>(&register::pwr_ctrl::PwrCtrlCfg {
+                    mode: register::pwr_ctrl::PowerMode::Sleep,
+                    ..pwr_ctrl
+                })
+                .await?;
+            let waited_us = running.max_measurement_time_us();
+            delay.delay_us(waited_us).await;
+            // A measurement that started before the last OSR write still runs with the old
+            // oversampling, so it can take longer than computed above.
+            self.wait_for_sleep(delay, waited_us).await?;
+        }
 
-        self.bus
-            .write::<register::osr::Osr>(&register::osr::OsrCfg {
-                osr_p: config.pressure_oversampling,
-                osr_t: config.temperature_oversampling,
-            })
-            .await?;
+        let osr = register::osr::OsrCfg {
+            osr_p: config.pressure_oversampling,
+            osr_t: config.temperature_oversampling,
+        };
+        self.bus.write::<register::osr::Osr>(&osr).await?;
+        self.measurement.osr = osr;
 
         self.bus
             .write::<register::odr::Odr>(&register::odr::OdrCfg {
@@ -210,6 +265,39 @@ where
             })
             .await?;
 
+        self.bus
+            .write::<register::pwr_ctrl::PwrCtrl>(&register::pwr_ctrl::PwrCtrlCfg {
+                press_en: config.enable_pressure,
+                temp_en: config.enable_temperature,
+                mode: config.mode,
+            })
+            .await?;
+        self.measurement.press_en = config.enable_pressure;
+        self.measurement.temp_en = config.enable_temperature;
+
+        Ok(())
+    }
+
+    /// Polls PWR_CTRL every millisecond until the device is in sleep mode.
+    ///
+    /// A measurement in progress delays a mode change until its end, and the device ignores
+    /// further mode changes in that time (datasheet section 3.3.4). `waited_us` is the time
+    /// already waited; the poll gives up with [`Bmp390Error::Timeout`] after the longest
+    /// possible measurement.
+    pub(crate) async fn wait_for_sleep<D: DelayNs>(
+        &mut self,
+        delay: &mut D,
+        mut waited_us: u32,
+    ) -> Bmp390Result<(), B::Error> {
+        while self.bus.read::<register::pwr_ctrl::PwrCtrl>().await?.mode
+            != register::pwr_ctrl::PowerMode::Sleep
+        {
+            if waited_us > MeasurementSettings::LONGEST.max_measurement_time_us() {
+                return Err(Bmp390Error::Timeout);
+            }
+            delay.delay_us(1000).await;
+            waited_us += 1000;
+        }
         Ok(())
     }
 
@@ -266,7 +354,24 @@ where
     pub async fn set_pressure_enabled(&mut self, enabled: bool) -> Bmp390Result<(), B::Error> {
         let mut pwr_ctrl = self.read::<register::pwr_ctrl::PwrCtrl>().await?;
         pwr_ctrl.press_en = enabled;
+        self.write_enables(pwr_ctrl).await
+    }
+
+    /// Writes back PWR_CTRL with changed enable bits.
+    ///
+    /// Forced mode is a trigger: the device returns to sleep at the end of the measurement. If it
+    /// does so between the read and this write, writing `Forced` back starts another measurement.
+    /// `Sleep` instead has the same effect as the end of the measurement.
+    async fn write_enables(
+        &mut self,
+        mut pwr_ctrl: register::pwr_ctrl::PwrCtrlCfg,
+    ) -> Bmp390Result<(), B::Error> {
+        if pwr_ctrl.mode == register::pwr_ctrl::PowerMode::Forced {
+            pwr_ctrl.mode = register::pwr_ctrl::PowerMode::Sleep;
+        }
         self.write::<register::pwr_ctrl::PwrCtrl>(&pwr_ctrl).await?;
+        self.measurement.press_en = pwr_ctrl.press_en;
+        self.measurement.temp_en = pwr_ctrl.temp_en;
 
         Ok(())
     }
@@ -281,9 +386,7 @@ where
     pub async fn set_temperature_enabled(&mut self, enabled: bool) -> Bmp390Result<(), B::Error> {
         let mut pwr_ctrl = self.read::<register::pwr_ctrl::PwrCtrl>().await?;
         pwr_ctrl.temp_en = enabled;
-        self.write::<register::pwr_ctrl::PwrCtrl>(&pwr_ctrl).await?;
-
-        Ok(())
+        self.write_enables(pwr_ctrl).await
     }
 
     /// Returns the oversampling configuration from the OSR (0x1C) register.
@@ -296,7 +399,9 @@ where
         &mut self,
         oversampling: &register::osr::OsrCfg,
     ) -> Bmp390Result<(), B::Error> {
-        Ok(self.bus.write::<register::osr::Osr>(oversampling).await?)
+        self.bus.write::<register::osr::Osr>(oversampling).await?;
+        self.measurement.osr = *oversampling;
+        Ok(())
     }
 
     /// Sets the power mode of the device by writing to the PwrCtrl (0x1B) register
@@ -331,6 +436,8 @@ where
         self.bus
             .write::<register::pwr_ctrl::PwrCtrl>(&pwr_ctrl)
             .await?;
+        self.measurement.press_en = pwr_ctrl.press_en;
+        self.measurement.temp_en = pwr_ctrl.temp_en;
         Ok(())
     }
     /// Reads the current power mode from the PwrCtrl (0x1B) register
@@ -473,11 +580,11 @@ where
     ///
     /// All user settings are reset to their default state[^1]
     ///
-    /// Before issuing a soft reset command, this method will wait for the command decoder to accept new commands. After the soft reset the method will wait for the `por_detected` flag in the `EVENT` register to be set..
+    /// Before issuing a soft reset command, this method will wait for the command decoder to accept new commands. After the soft reset the method waits 2 ms and then for the `por_detected` flag in the `EVENT` register to be set.
     /// If these events do not happen in a timely fashion, an error of type [`Bmp390Error::Timeout`] will be returned.
     ///
     /// [`1] This resets the chip to factory defaults, not to the configuration that was provided when constructing the driver.
-    pub async fn soft_reset(&mut self) -> Bmp390Result<(), B::Error> {
+    pub async fn soft_reset<D: DelayNs>(&mut self, delay: &mut D) -> Bmp390Result<(), B::Error> {
         // Is command decoder ready to accept a new command? Poll it max 32 times (non-scientifically chosen number)
         self.wait_command_ready(32).await?;
 
@@ -486,6 +593,12 @@ where
 
         // Issue soft reset command
         self.write::<cmd::Cmd>(&cmd::CmdData::SoftReset).await?;
+
+        // The device does not communicate while it resets, and writes in this time are lost.
+        // The datasheet gives no reset time: 2 ms is the start-up time to the first
+        // communication (Section 1, table 2), and the Bosch reference driver waits as long.
+        delay.delay_ms(2).await;
+        self.measurement = MeasurementSettings::DEFAULT;
 
         // Wait for por_detected flag to be set
         self.wait_power_on_reset_detected(32).await?;
@@ -568,7 +681,8 @@ where
 
         self.bus
             .write::<FifoConfig2>(&FifoConfig2Fields {
-                fifo_subsampling: cfg.subsampling() & 0b0000_0111,
+                // fifo_subsampling has 3 bits; values above 7 clamp to the largest factor, 2^7.
+                fifo_subsampling: cfg.subsampling().min(7),
                 data_select: if cfg.apply_iir_filter() {
                     FifoDataSource::Filtered
                 } else {
@@ -599,6 +713,11 @@ where
     ///
     /// This is important to note; If you want to correlate reading with the sensor timestamp, you need to completely drain the FIFO.
     /// Timestamps are not stored in the FIFO, they are only appended after the *last* frame.
+    ///
+    /// The method reads the header of the oldest frame and then the whole frame, in two bus transactions.
+    /// If the oldest frame changes between them (a frame arrives in an empty FIFO, or a full FIFO in
+    /// [`FifoFullBehavior::OverwriteOldest`] mode drops its oldest frame), the method returns the frame
+    /// that the second read got. A short frame (2 bytes) that follows it in the same read is then lost.
     ///
     /// # Examples
     ///
@@ -636,75 +755,68 @@ where
     /// }
     /// # Ok(()) }
     pub async fn read_fifo_frame(&mut self) -> Bmp390Result<FifoFrame, B::Error> {
-        const SENSOR_SMALL_FRAME_SIZE: usize = 4;
-        const SENSOR_LARGE_FRAME_SIZE: usize = 7;
-        const SENSOR_EMPTY_FRAME_SIZE: usize = 2;
-        const CONTROL_FRAME_SIZE: usize = 2;
+        // Ideally, we would burst read FIFO_DATA and *not* end the transaction, that way we could
+        // read the header, figure out the frame size, and just continue reading in the same burst.
+        // But since the SPI/I2C traits in embedded_hal_async do not include the possibility to
+        // begin a transaction and allow arbitrary read/writes before ending the transaction
+        // (i.e in the case if SPI, assert the CS pin and leave it asserted)
+        // We have to ask for the entire frame, which of course redundantly gives us the header again.
+        //
+        // The FIFO can change between the two reads: a frame arrives in an empty FIFO, or an
+        // overflow drops the oldest frame (datasheet sections 3.6.4 and 3.6.6). So the frame is
+        // decoded with the header of the read that returned it. A frame longer than that read
+        // was only partly read, and the device sends it again on the next read (section 3.6.6.2).
+        // The size grows on each retry and is at most 7 bytes, so the loop ends.
+        let mut size = fifo_frame_size(self.bus.read::<FifoData<1>>().await?[0])?;
+        loop {
+            let mut frame = [0u8; SENSOR_LARGE_FRAME_SIZE];
+            match size {
+                CONTROL_FRAME_SIZE => frame[..CONTROL_FRAME_SIZE]
+                    .copy_from_slice(&self.bus.read::<FifoData<CONTROL_FRAME_SIZE>>().await?),
+                SENSOR_SMALL_FRAME_SIZE => frame[..SENSOR_SMALL_FRAME_SIZE]
+                    .copy_from_slice(&self.bus.read::<FifoData<SENSOR_SMALL_FRAME_SIZE>>().await?),
+                _ => frame
+                    .copy_from_slice(&self.bus.read::<FifoData<SENSOR_LARGE_FRAME_SIZE>>().await?),
+            }
+            let actual = fifo_frame_size(frame[0])?;
+            if actual <= size {
+                return Ok(self.decode_fifo_frame(&frame));
+            }
+            size = actual;
+        }
+    }
 
-        let header = FifoHeader::from(self.bus.read::<FifoData<1>>().await?[0]);
+    /// Decodes a FIFO frame whose header [`fifo_frame_size`] accepted.
+    fn decode_fifo_frame(&mut self, frame: &[u8; SENSOR_LARGE_FRAME_SIZE]) -> FifoFrame {
+        let header = FifoHeader::from(frame[0]);
+        let u24 = |at: usize| u32::from_le_bytes([frame[at], frame[at + 1], frame[at + 2], 0]);
 
         if header.is_control_frame() {
-            // Ideally, we would burst read FIFO_DATA and *not* end the transaction, that way we could
-            // read the header, figure out the frame size, and just continue reading in the same burst.
-            // But since the SPI/I2C traits in embedded_hal_async do not include the possibility to
-            // begin a transaction and allow arbitrary read/writes before ending the transaction
-            // (i.e in the case if SPI, assert the CS pin and leave it asserted)
-            // We have to ask for the entire frame, which of course redundantly gives us the header again. Like so:
-            let _ = self.bus.read::<FifoData<CONTROL_FRAME_SIZE>>().await?;
             if header.config_error_flag() {
-                Ok(FifoFrame::ControlFrame(ControlFrameType::ConfigError))
-            } else if header.config_change_flag() {
-                Ok(FifoFrame::ControlFrame(ControlFrameType::ConfigChange))
+                FifoFrame::ControlFrame(ControlFrameType::ConfigError)
             } else {
-                Err(Bmp390Error::UnexpectedFifoData)
+                FifoFrame::ControlFrame(ControlFrameType::ConfigChange)
             }
-        } else if header.is_sensor_frame() {
-            if header.sensor_time_flag() {
-                let frame = self.bus.read::<FifoData<SENSOR_SMALL_FRAME_SIZE>>().await?;
+        } else if header.sensor_time_flag() {
+            FifoFrame::SensorFrame(SensorFrameType::SensorTime(u24(1)))
+        } else if header.temperature_flag() && header.pressure_flag() {
+            let temperature = self.calibration_data.compensate_temperature(u24(1));
+            let pressure = self.calibration_data.compensate_pressure(u24(4));
 
-                let value = u32::from_le_bytes([frame[1], frame[2], frame[3], 0]);
-
-                Ok(FifoFrame::SensorFrame(SensorFrameType::SensorTime(value)))
-            } else {
-                if header.temperature_flag() && header.pressure_flag() {
-                    let frame = self.bus.read::<FifoData<SENSOR_LARGE_FRAME_SIZE>>().await?;
-                    let temperature = u32::from_le_bytes([frame[1], frame[2], frame[3], 0]);
-                    let pressure = u32::from_le_bytes([frame[4], frame[5], frame[6], 0]);
-
-                    let temperature = self.calibration_data.compensate_temperature(temperature);
-                    let pressure = self.calibration_data.compensate_pressure(pressure);
-
-                    Ok(FifoFrame::SensorFrame(
-                        SensorFrameType::PressureAndTemperature {
-                            pressure,
-                            temperature,
-                        },
-                    ))
-                } else if header.temperature_flag() {
-                    let frame = self.bus.read::<FifoData<SENSOR_SMALL_FRAME_SIZE>>().await?;
-
-                    let temperature = u32::from_le_bytes([frame[1], frame[2], frame[3], 0]);
-
-                    Ok(FifoFrame::SensorFrame(SensorFrameType::Temperature(
-                        self.calibration_data.compensate_temperature(temperature),
-                    )))
-                } else if header.pressure_flag() {
-                    let frame = self.bus.read::<FifoData<SENSOR_SMALL_FRAME_SIZE>>().await?;
-
-                    let pressure = u32::from_le_bytes([frame[1], frame[2], frame[3], 0]);
-
-                    Ok(FifoFrame::SensorFrame(SensorFrameType::Pressure(
-                        self.calibration_data.compensate_pressure(pressure),
-                    )))
-                } else {
-                    // Read and discard frame.
-                    let _ = self.bus.read::<FifoData<SENSOR_EMPTY_FRAME_SIZE>>().await?;
-
-                    Ok(FifoFrame::SensorFrame(SensorFrameType::Empty))
-                }
-            }
+            FifoFrame::SensorFrame(SensorFrameType::PressureAndTemperature {
+                pressure,
+                temperature,
+            })
+        } else if header.temperature_flag() {
+            FifoFrame::SensorFrame(SensorFrameType::Temperature(
+                self.calibration_data.compensate_temperature(u24(1)),
+            ))
+        } else if header.pressure_flag() {
+            FifoFrame::SensorFrame(SensorFrameType::Pressure(
+                self.calibration_data.compensate_pressure(u24(1)),
+            ))
         } else {
-            Err(Bmp390Error::UnexpectedFifoData)
+            FifoFrame::SensorFrame(SensorFrameType::Empty)
         }
     }
 
@@ -781,8 +893,43 @@ where
     /// It is described in detail in datasheet section 3.9.
     /// Section 3.9.2 of the datasheet holds the equation for the *typical* measurement time. The value returned from this
     /// method is produced by multiplying that value by 1.2.
+    ///
+    /// The value follows the settings that the driver methods wrote last. A raw [`write`](Self::write)
+    /// to OSR or PWR_CTRL does not update it.
     pub fn max_measurement_time_us(&self) -> u32 {
-        self.max_measurement_time_us
+        self.measurement.max_measurement_time_us()
+    }
+}
+
+/// Size of a control frame, an empty frame
+const CONTROL_FRAME_SIZE: usize = 2;
+/// Size of a sensor time frame, or of a sensor frame with one of pressure or temperature
+const SENSOR_SMALL_FRAME_SIZE: usize = 4;
+/// Size of a sensor frame with pressure and temperature
+const SENSOR_LARGE_FRAME_SIZE: usize = 7;
+
+/// Returns the size of the FIFO frame that starts with `header` (datasheet section 3.6.5).
+fn fifo_frame_size<E>(header: u8) -> Bmp390Result<usize, E> {
+    let header = FifoHeader::from(header);
+    if header.is_control_frame() {
+        if header.config_error_flag() || header.config_change_flag() {
+            Ok(CONTROL_FRAME_SIZE)
+        } else {
+            Err(Bmp390Error::UnexpectedFifoData)
+        }
+    } else if header.is_sensor_frame() {
+        let time = header.sensor_time_flag();
+        let temperature = header.temperature_flag();
+        let pressure = header.pressure_flag();
+        Ok(match (time, temperature, pressure) {
+            (true, _, _) => SENSOR_SMALL_FRAME_SIZE,
+            (false, true, true) => SENSOR_LARGE_FRAME_SIZE,
+            (false, true, false) | (false, false, true) => SENSOR_SMALL_FRAME_SIZE,
+            // Empty frame: a header and one byte of zeros
+            (false, false, false) => CONTROL_FRAME_SIZE,
+        })
+    } else {
+        Err(Bmp390Error::UnexpectedFifoData)
     }
 }
 
@@ -933,6 +1080,7 @@ pub enum ResetPolicy {
 mod tests {
     use super::*;
     use crate::register::data::Data;
+    use crate::register::pwr_ctrl::PwrCtrl;
     use crate::register::{calibration::Calibration, chip_id::ChipId};
     use crate::testing::{FakeBus, FakeDelay};
 
@@ -940,6 +1088,7 @@ mod tests {
     async fn bmp390_read_sensor_data() {
         let mut bus: FakeBus<10> = FakeBus::new();
         bus.with_response::<ChipId>(&[96]);
+        bus.with_response::<PwrCtrl>(&[0x00]);
         bus.with_response::<Calibration>(&[
             0x98, 0x6E, 0x13, 0x4D, 0xF9, 0xB0, 0x1B, 0xC0, 0x15, 0x06, 0x01, 0x92, 0x4A, 0xAE,
             0x5D, 0x03, 0xFA, 0x08, 0x0F, 0x06, 0xF5,
@@ -964,6 +1113,7 @@ mod tests {
     async fn bmp390_read_empty_fifo_frame() {
         let mut bus: FakeBus<10> = FakeBus::new();
         bus.with_response::<ChipId>(&[96]);
+        bus.with_response::<PwrCtrl>(&[0x00]);
         bus.with_any_response::<Calibration>();
         bus.with_response::<FifoData<1>>(&[0b1000_0000]);
         bus.with_response::<FifoData<2>>(&[0b1000_0000, 0]);
@@ -985,6 +1135,7 @@ mod tests {
     async fn bmp390_read_sensor_time_fifo_frame() {
         let mut bus: FakeBus<10> = FakeBus::new();
         bus.with_response::<ChipId>(&[96]);
+        bus.with_response::<PwrCtrl>(&[0x00]);
         bus.with_any_response::<Calibration>();
         bus.with_response::<FifoData<1>>(&[0b1010_0000]);
         bus.with_response::<FifoData<4>>(&[0b1010_0000, 0x78, 0x56, 0x34]);
@@ -1009,6 +1160,7 @@ mod tests {
     async fn bmp390_read_temp_fifo_frame() {
         let mut bus: FakeBus<10> = FakeBus::new();
         bus.with_response::<ChipId>(&[96]);
+        bus.with_response::<PwrCtrl>(&[0x00]);
         bus.with_response::<Calibration>(&[1u8; 21]);
         bus.with_response::<FifoData<1>>(&[0b1001_0000]);
         bus.with_response::<FifoData<4>>(&[0b1001_0000, 0x78, 0x56, 0x34]);
@@ -1033,6 +1185,7 @@ mod tests {
     async fn bmp390_read_pressure_fifo_frame() {
         let mut bus: FakeBus<10> = FakeBus::new();
         bus.with_response::<ChipId>(&[96]);
+        bus.with_response::<PwrCtrl>(&[0x00]);
         bus.with_response::<Calibration>(&[1u8; 21]);
         bus.with_response::<FifoData<1>>(&[0b1000_0100]);
         bus.with_response::<FifoData<4>>(&[0b1000_0100, 0x78, 0x56, 0x34]);
@@ -1057,9 +1210,10 @@ mod tests {
     async fn bmp390_read_pressure_and_temp_fifo_frame() {
         let mut bus: FakeBus<10> = FakeBus::new();
         bus.with_response::<ChipId>(&[96]);
+        bus.with_response::<PwrCtrl>(&[0x00]);
         bus.with_response::<Calibration>(&[1u8; 21]);
         bus.with_response::<FifoData<1>>(&[0b1001_0100]);
-        bus.with_response::<FifoData<7>>(&[0b1000_0100, 0x98, 0x76, 0x54, 0x32, 0x21, 0x10]);
+        bus.with_response::<FifoData<7>>(&[0b1001_0100, 0x98, 0x76, 0x54, 0x32, 0x21, 0x10]);
 
         let mut device = Bmp390::new(
             bus,
@@ -1084,6 +1238,7 @@ mod tests {
     async fn bmp390_read_control_frame_config_error() {
         let mut bus: FakeBus<10> = FakeBus::new();
         bus.with_response::<ChipId>(&[96]);
+        bus.with_response::<PwrCtrl>(&[0x00]);
         bus.with_any_response::<Calibration>();
         bus.with_response::<FifoData<1>>(&[0b0100_0100]);
         bus.with_response::<FifoData<2>>(&[0b0100_0100, 0xAB]);
@@ -1108,6 +1263,7 @@ mod tests {
     async fn bmp390_read_control_frame_config_change() {
         let mut bus: FakeBus<10> = FakeBus::new();
         bus.with_response::<ChipId>(&[96]);
+        bus.with_response::<PwrCtrl>(&[0x00]);
         bus.with_any_response::<Calibration>();
         bus.with_response::<FifoData<1>>(&[0b0100_1000]);
         bus.with_response::<FifoData<2>>(&[0b0100_1000, 0xCD]);

@@ -29,6 +29,7 @@ mod builder;
 
 use crate::bus::Bus;
 use crate::fifo::{ControlFrameType, FifoConfiguration, FifoFrame, SensorFrameType};
+use crate::register::int_ctrl::IntCtrl;
 use crate::register::int_status::IntStatus;
 use crate::register::osr::{Osr, OsrCfg};
 use crate::typestate::measurement::Measurement;
@@ -40,6 +41,10 @@ use embedded_hal_async::digital::Wait;
 
 pub use builder::Bmp390Builder;
 use crate::error::Bmp390Error;
+
+/// How long to poll for data ready without an interrupt pin. The typestate interface runs normal
+/// mode at 50 Hz, and the longest measurement takes about 160 ms (datasheet section 3.9.2).
+const DATA_READY_TIMEOUT_US: u32 = 1_000_000;
 
 /// This represents all possible errors that can occur when using the typestate interface.
 #[derive(Debug)]
@@ -100,40 +105,68 @@ impl<Mode, Out: OutputConfig, B: Bus, IntPin: Wait + InputPin, Delay: DelayNs, c
         &mut self,
     ) -> TypeStateResult<Measurement<f32, f32, Out>, B::Error, IntPin::Error> {
         if let Some(int_pin) = &mut self.int_pin {
+            // The interrupt is latched and active high (see `configure_interrupt_pin`): the pin
+            // stays high until INT_STATUS is read, so a wait for the level cannot miss it. In
+            // non-latched mode the data ready pulse lasts only 2.5 ms (datasheet section 3.7.2).
             loop {
-                while int_pin.is_high().map_err(TypeStateError::Pin)? {
-                    let int_status = self
-                        .device
-                        .read::<IntStatus>()
-                        .await
-                        .map_err(TypeStateError::Device)?;
-                    if int_status.drdy {
-                        let data = self
-                            .device
-                            .read_sensor_data()
-                            .await
-                            .map_err(TypeStateError::Device)?;
-                        return Ok(Measurement::new(data.temperature(), data.pressure()));
-                    }
-                }
-
-                int_pin
-                    .wait_for_rising_edge()
+                int_pin.wait_for_high().await.map_err(TypeStateError::Pin)?;
+                let int_status = self
+                    .device
+                    .read::<IntStatus>()
                     .await
-                    .map_err(TypeStateError::Pin)?;
+                    .map_err(TypeStateError::Device)?;
+                if int_status.drdy {
+                    break;
+                }
             }
         } else {
-            self.delay
-                .delay_us(self.device.max_measurement_time_us())
-                .await;
-
-            let data = self
+            // Without a pin, poll the data ready flag. In normal mode the next measurement can
+            // start up to a sampling period after the call, so the measurement time alone is
+            // not enough.
+            let mut waited_us = self.device.max_measurement_time_us();
+            self.delay.delay_us(waited_us).await;
+            while !self
                 .device
-                .read_sensor_data()
+                .read::<IntStatus>()
                 .await
-                .map_err(TypeStateError::Device)?;
-            Ok(Measurement::new(data.temperature(), data.pressure()))
+                .map_err(TypeStateError::Device)?
+                .drdy
+            {
+                if waited_us > DATA_READY_TIMEOUT_US {
+                    return Err(TypeStateError::Device(Bmp390Error::Timeout));
+                }
+                self.delay.delay_us(1000).await;
+                waited_us += 1000;
+            }
         }
+
+        let data = self
+            .device
+            .read_sensor_data()
+            .await
+            .map_err(TypeStateError::Device)?;
+        Ok(Measurement::new(data.temperature(), data.pressure()))
+    }
+
+    /// Clears a data ready flag of an earlier measurement, so that [`Self::wait_for_data`] waits
+    /// for a new one.
+    async fn discard_data_ready(&mut self) -> Bmp390Result<(), B::Error> {
+        let _ = self.device.read::<IntStatus>().await?;
+        Ok(())
+    }
+
+    /// Routes only the data ready interrupt to the INT pin, latched and active high.
+    ///
+    /// The device may keep another INT_CTRL configuration from before, since a soft reset is
+    /// optional. The open-drain/push-pull setting depends on the board and is kept.
+    async fn configure_interrupt_pin(device: &mut Bmp390<B>) -> Bmp390Result<(), B::Error> {
+        let mut int_ctrl = device.read::<IntCtrl>().await?;
+        int_ctrl.drdy_en = true;
+        int_ctrl.ffull_en = false;
+        int_ctrl.fwtm_en = false;
+        int_ctrl.int_level = true;
+        int_ctrl.int_latch = true;
+        device.write::<IntCtrl>(&int_ctrl).await
     }
 
     /// Applies initial configuration. Must be called by Bmp390<Normal> and Bmp390<Forced> when initializing.
